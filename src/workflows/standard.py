@@ -16,6 +16,11 @@ from src.query.pagination import run_paginated_query
 from src.query.filters import parse_filter_config
 from src.csv.validator import validate_metadata_csv
 from src.download.downloader import download_attachments
+from src.utils import log_section_header
+from src.workflows.common import (
+    ensure_directories,
+    log_download_summary
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,17 +66,13 @@ def process_standard_workflow(args: Namespace, chunk_size: int = 8192) -> Dict:
     # Step 1: Query attachments (or use provided CSV)
     if args.metadata:
         # User provided existing CSV - validate and use it
-        logger.info("=" * 70)
-        logger.info("USING PROVIDED METADATA CSV")
-        logger.info("=" * 70)
+        log_section_header("USING PROVIDED METADATA CSV")
         logger.info(f"CSV file: {args.metadata}")
 
         # Validate CSV structure
         is_valid, error_msg = validate_metadata_csv(args.metadata)
         if not is_valid:
-            logger.error("=" * 70)
-            logger.error("CSV VALIDATION FAILED")
-            logger.error("=" * 70)
+            log_section_header("CSV VALIDATION FAILED")
             logger.error(f"Error: {error_msg}")
             logger.error("")
             logger.error("Please ensure your CSV file:")
@@ -92,6 +93,7 @@ def process_standard_workflow(args: Namespace, chunk_size: int = 8192) -> Dict:
     else:
         # No CSV provided - query from Salesforce
         metadata_dir = args.output / 'metadata'
+        ensure_directories(metadata_dir)
 
         # Check if pagination is configured
         if args.target_count and args.target_count > 0:
@@ -113,6 +115,7 @@ def process_standard_workflow(args: Namespace, chunk_size: int = 8192) -> Dict:
 
     # Step 2: Download files
     files_dir = args.output / 'files'
+    ensure_directories(files_dir)
 
     # If pagination was used with Python filters, filters were already applied
     # Don't apply them again in the downloader
@@ -131,13 +134,6 @@ def process_standard_workflow(args: Namespace, chunk_size: int = 8192) -> Dict:
     )
 
     # Final summary
-    logger.info("=" * 70)
-    logger.info("WORKFLOW COMPLETE")
-    logger.info("=" * 70)
-    logger.info(f"Metadata: {csv_path}")
-    logger.info(f"Files: {files_dir}")
-    logger.info(f"Downloaded: {stats['success']}/{stats['total']}")
-    if stats.get('skipped', 0) > 0:
-        logger.info(f"Skipped (already exists): {stats['skipped']}")
+    log_download_summary(stats, csv_path, files_dir)
 
     return stats

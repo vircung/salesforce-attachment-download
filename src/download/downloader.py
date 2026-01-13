@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional
 from src.api.sf_auth import get_sf_auth_info, SFAuthError
 from src.api.sf_client import SalesforceClient, SFAPIError
 from src.query.filters import ParentIdFilter, apply_parent_id_filter, log_filter_summary
+from src.utils import log_section_header
 
 
 def setup_logging(log_file: Path) -> None:
@@ -164,17 +165,13 @@ def download_attachments(
 
     try:
         # Step 1: Get SF authentication
-        logger.info("=" * 60)
-        logger.info("STEP 1: Retrieving Salesforce authentication")
-        logger.info("=" * 60)
+        log_section_header("STEP 1: Retrieving Salesforce authentication")
 
         auth_info = get_sf_auth_info(org_alias)
         logger.info(f"Authenticated as: {auth_info['username']}")
 
         # Step 2: Initialize SF client
-        logger.info("=" * 60)
-        logger.info("STEP 2: Initializing Salesforce API client")
-        logger.info("=" * 60)
+        log_section_header("STEP 2: Initializing Salesforce API client")
 
         with SalesforceClient(
             access_token=auth_info['access_token'],
@@ -183,18 +180,14 @@ def download_attachments(
         ) as client:
 
             # Step 3: Read metadata
-            logger.info("=" * 60)
-            logger.info("STEP 3: Reading attachment metadata")
-            logger.info("=" * 60)
+            log_section_header("STEP 3: Reading attachment metadata")
 
             attachments = read_metadata_csv(metadata_csv)
             original_count = len(attachments)
 
             # Step 3.5: Apply filtering if configured
             if filter_config and filter_config.has_filters() and filter_config.strategy == 'python':
-                logger.info("=" * 60)
-                logger.info("STEP 3.5: Applying ParentId filter")
-                logger.info("=" * 60)
+                log_section_header("STEP 3.5: Applying ParentId filter")
 
                 attachments = apply_parent_id_filter(attachments, filter_config)
                 log_filter_summary(original_count, len(attachments), filter_config)
@@ -208,9 +201,7 @@ def download_attachments(
             stats.total = len(attachments)
 
             # Step 4: Download files
-            logger.info("=" * 60)
-            logger.info(f"STEP 4: Downloading {stats.total} attachments")
-            logger.info("=" * 60)
+            log_section_header(f"STEP 4: Downloading {stats.total} attachments", width=60)
 
             output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -274,9 +265,7 @@ def download_attachments(
                     continue
 
         # Step 5: Summary
-        logger.info("=" * 60)
-        logger.info("DOWNLOAD SUMMARY")
-        logger.info("=" * 60)
+        log_section_header("DOWNLOAD SUMMARY", width=60)
         logger.info(f"Total attachments: {stats.total}")
         logger.info(f"Downloaded: {stats.success}")
         logger.info(f"Skipped (already exists): {stats.skipped}")

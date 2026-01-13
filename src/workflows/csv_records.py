@@ -15,6 +15,11 @@ from src.query.executor import run_query_script_with_filter
 from src.query.filters import ParentIdFilter, build_soql_where_clause
 from src.csv.processor import process_records_directory
 from src.download.downloader import download_attachments
+from src.utils import log_section_header
+from src.workflows.common import (
+    ensure_directories,
+    merge_csv_files
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +63,7 @@ def process_csv_records_workflow(
         ValueError: If no CSV files found or CSV missing 'Id' column
         RuntimeError: If query or download fails
     """
-    logger.info("=" * 70)
-    logger.info("CSV-BASED ATTACHMENT EXTRACTION WORKFLOW")
-    logger.info("=" * 70)
+    log_section_header("CSV-BASED ATTACHMENT EXTRACTION WORKFLOW")
     logger.info(f"Org: {org_alias}")
     logger.info(f"Records directory: {records_dir.absolute()}")
     logger.info(f"Output directory: {output_dir.absolute()}")
@@ -84,9 +87,7 @@ def process_csv_records_workflow(
 
     # Process each CSV file
     for csv_idx, csv_info in enumerate(csv_records, start=1):
-        logger.info("=" * 70)
-        logger.info(f"PROCESSING CSV {csv_idx}/{len(csv_records)}: {csv_info.csv_name}.csv")
-        logger.info("=" * 70)
+        log_section_header(f"PROCESSING CSV {csv_idx}/{len(csv_records)}: {csv_info.csv_name}.csv")
         logger.info(f"Records: {csv_info.total_records}")
         logger.info(f"Batches: {csv_info.total_batches}")
         logger.info("")
@@ -97,8 +98,7 @@ def process_csv_records_workflow(
             csv_metadata_dir = csv_output_dir / 'metadata'
             csv_files_dir = csv_output_dir / 'files'
 
-            csv_metadata_dir.mkdir(parents=True, exist_ok=True)
-            csv_files_dir.mkdir(parents=True, exist_ok=True)
+            ensure_directories(csv_metadata_dir, csv_files_dir)
 
             logger.info(f"Output directories:")
             logger.info(f"  Metadata: {csv_metadata_dir}")
@@ -107,8 +107,7 @@ def process_csv_records_workflow(
 
             # Query attachments for each batch
             batch_csv_paths = []
-            accumulated_attachments = []
-            csv_fieldnames = None
+            total_attachments = 0
 
             for batch_idx, id_batch in enumerate(csv_info.id_batches):
                 logger.info(f"Batch {batch_idx + 1}/{csv_info.total_batches}: Querying {len(id_batch)} ParentId(s)")
@@ -130,20 +129,11 @@ def process_csv_records_workflow(
 
                 batch_csv_paths.append(batch_csv_path)
 
-                # Read batch results
+                # Count rows in batch (quick check without full read)
                 with batch_csv_path.open('r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-
-                    # Capture fieldnames from first batch
-                    if csv_fieldnames is None:
-                        csv_fieldnames = reader.fieldnames
-                        logger.debug(f"Captured fieldnames: {csv_fieldnames}")
-
-                    # Accumulate all attachments
-                    batch_attachments = list(reader)
-                    accumulated_attachments.extend(batch_attachments)
-
-                    logger.info(f"Batch {batch_idx + 1}/{csv_info.total_batches}: Found {len(batch_attachments)} attachment(s)")
+                    batch_count = sum(1 for _ in csv.DictReader(f))
+                    total_attachments += batch_count
+                    logger.info(f"Batch {batch_idx + 1}/{csv_info.total_batches}: Found {batch_count} attachment(s)")
 
                 logger.info("")
 
@@ -151,23 +141,13 @@ def process_csv_records_workflow(
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             merged_csv_path = csv_metadata_dir / f"attachments_{timestamp}_merged.csv"
 
-            logger.info(f"Merging {len(batch_csv_paths)} batch CSV(s) into: {merged_csv_path.name}")
-
-            with merged_csv_path.open('w', encoding='utf-8', newline='') as f:
-                if csv_fieldnames:
-                    writer = csv.DictWriter(f, fieldnames=csv_fieldnames)
-                    writer.writeheader()
-                    writer.writerows(accumulated_attachments)
-                else:
-                    logger.warning("No fieldnames captured - writing empty CSV")
-
-            logger.info(f"Merged CSV created with {len(accumulated_attachments)} attachment(s)")
+            merged_count = merge_csv_files(batch_csv_paths, merged_csv_path)
             logger.info("")
 
             # Download attachments if enabled
             downloaded_count = 0
-            if download and len(accumulated_attachments) > 0:
-                logger.info(f"Downloading {len(accumulated_attachments)} attachment(s) to: {csv_files_dir}")
+            if download and merged_count > 0:
+                logger.info(f"Downloading {merged_count} attachment(s) to: {csv_files_dir}")
                 logger.info("")
 
                 try:
@@ -180,11 +160,11 @@ def process_csv_records_workflow(
                     downloaded_count = download_stats['success']
                     skipped_count = download_stats.get('skipped', 0)
 
-                    logger.info(f"Downloaded: {downloaded_count}, Skipped: {skipped_count}, Total: {len(accumulated_attachments)} file(s)")
+                    logger.info(f"Downloaded: {downloaded_count}, Skipped: {skipped_count}, Total: {merged_count} file(s)")
                 except Exception as e:
                     logger.error(f"Download failed for {csv_info.csv_name}: {e}")
                     # Continue processing other CSVs even if download fails
-            elif download and len(accumulated_attachments) == 0:
+            elif download and merged_count == 0:
                 logger.info("No attachments to download")
             else:
                 logger.info("Download skipped (download=False)")
@@ -194,14 +174,14 @@ def process_csv_records_workflow(
                 'csv_name': csv_info.csv_name,
                 'records': csv_info.total_records,
                 'batches': csv_info.total_batches,
-                'attachments': len(accumulated_attachments),
+                'attachments': merged_count,
                 'downloaded': downloaded_count,
                 'output_dir': str(csv_output_dir)
             }
             stats['per_csv'].append(csv_stats)
             stats['total_records'] += csv_info.total_records
             stats['total_batches'] += csv_info.total_batches
-            stats['total_attachments'] += len(accumulated_attachments)
+            stats['total_attachments'] += merged_count
 
             logger.info(f"✓ Completed {csv_info.csv_name}.csv")
             logger.info("")
@@ -213,9 +193,7 @@ def process_csv_records_workflow(
             # Continue processing other CSV files
 
     # Final summary
-    logger.info("=" * 70)
-    logger.info("WORKFLOW SUMMARY")
-    logger.info("=" * 70)
+    log_section_header("WORKFLOW SUMMARY")
     logger.info(f"Total CSV files: {stats['total_csv_files']}")
     logger.info(f"Total records: {stats['total_records']}")
     logger.info(f"Total batches executed: {stats['total_batches']}")
