@@ -136,6 +136,8 @@ def process_standard_workflow(args: Namespace, chunk_size: int = 8192) -> Dict:
     logger.info("=" * 70)
     logger.info(f"Metadata: {csv_path}")
     logger.info(f"Files: {files_dir}")
-    logger.info(f"Success: {stats['success']}/{stats['total']}")
+    logger.info(f"Downloaded: {stats['success']}/{stats['total']}")
+    if stats.get('skipped', 0) > 0:
+        logger.info(f"Skipped (already exists): {stats['skipped']}")
 
     return stats

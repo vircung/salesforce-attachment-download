@@ -171,13 +171,16 @@ def process_csv_records_workflow(
                 logger.info("")
 
                 try:
-                    downloaded_count = download_attachments(
+                    download_stats = download_attachments(
                         org_alias=org_alias,
                         metadata_csv=merged_csv_path,
                         output_dir=csv_files_dir,
                         filter_config=None  # No additional filtering needed
                     )
-                    logger.info(f"Downloaded {downloaded_count}/{len(accumulated_attachments)} file(s)")
+                    downloaded_count = download_stats['success']
+                    skipped_count = download_stats.get('skipped', 0)
+
+                    logger.info(f"Downloaded: {downloaded_count}, Skipped: {skipped_count}, Total: {len(accumulated_attachments)} file(s)")
                 except Exception as e:
                     logger.error(f"Download failed for {csv_info.csv_name}: {e}")
                     # Continue processing other CSVs even if download fails

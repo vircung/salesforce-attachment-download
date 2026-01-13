@@ -48,6 +48,7 @@ class DownloadStats:
     total: int = 0
     success: int = 0
     failed: int = 0
+    skipped: int = 0
     errors: List[Dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -56,6 +57,7 @@ class DownloadStats:
             'total': self.total,
             'success': self.success,
             'failed': self.failed,
+            'skipped': self.skipped,
             'errors': self.errors
         }
 
@@ -149,6 +151,7 @@ def download_attachments(
         Dictionary with summary statistics including:
         - total: Total number of attachments processed
         - success: Number of successful downloads
+        - skipped: Number of files skipped (already exist)
         - failed: Number of failed downloads
         - errors: List of error details for failed downloads
 
@@ -247,6 +250,12 @@ def download_attachments(
 
                 logger.info(f"[{idx}/{stats.total}] Processing: {original_name}")
 
+                # Check if file already exists
+                if output_path.exists():
+                    logger.info(f"  ⊙ Skipped (already exists): {output_path.name}")
+                    stats.skipped += 1
+                    continue
+
                 try:
                     # Download with progress indication using configured chunk size
                     client.download_attachment(attachment_id, output_path, chunk_size=chunk_size)
@@ -269,7 +278,8 @@ def download_attachments(
         logger.info("DOWNLOAD SUMMARY")
         logger.info("=" * 60)
         logger.info(f"Total attachments: {stats.total}")
-        logger.info(f"Successful: {stats.success}")
+        logger.info(f"Downloaded: {stats.success}")
+        logger.info(f"Skipped (already exists): {stats.skipped}")
         logger.info(f"Failed: {stats.failed}")
 
         if stats.errors:
