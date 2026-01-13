@@ -5,6 +5,7 @@ Proof of concept tool to download Salesforce Attachment records and files.
 ## Features
 
 - Query Attachment records using Salesforce CLI (configurable limit, default: 100)
+- **Automatic pagination** to fetch target number of records using SOQL OFFSET
 - **Filter attachments by ParentId** (prefix-based or exact ID matching)
 - Export metadata to CSV
 - Download attachment files via REST API
@@ -12,6 +13,7 @@ Proof of concept tool to download Salesforce Attachment records and files.
 - Progress indicators and logging
 - Error handling for common failures
 - Flexible configuration via CLI arguments or .env file
+- Backward compatible (pagination is opt-in)
 
 ## Prerequisites
 
@@ -53,6 +55,40 @@ Run both query and download in one command:
 ```bash
 python main.py --org your-org --output ./output
 ```
+
+### Using Existing Metadata CSV
+
+Skip the Salesforce query step and use an existing CSV file:
+
+```bash
+# Use a previously generated CSV
+python main.py --metadata ./output/metadata/attachments_20250113_120000.csv
+
+# Or provide your own CSV file
+python main.py --metadata /path/to/my/attachments.csv --output ./downloads
+```
+
+**Via .env file:**
+```bash
+# Set in .env
+METADATA_CSV=./output/metadata/attachments_20250113_120000.csv
+
+# Then run without arguments
+python main.py
+```
+
+**CSV Requirements:**
+- Must be UTF-8 encoded
+- Must have a header row with column names
+- Must contain required columns: `Id`, `Name`
+- Should contain `ParentId` column if using filters
+- Must have at least one data row
+
+**When to use this:**
+- Re-download files after a previous run
+- Process metadata from a different source
+- Test download logic without querying Salesforce
+- Resume after a failed download
 
 ### Step-by-Step
 
@@ -123,7 +159,9 @@ The tool supports loading configuration from a `.env` file in the project root d
 | `OUTPUT_DIR` | Base output directory | `./output` | `--output` |
 | `LOG_FILE` | Log file path | `./logs/download.log` | N/A |
 | `CHUNK_SIZE` | Download chunk size in bytes | `8192` | N/A |
-| `QUERY_LIMIT` | Maximum records to query | `100` | `--query-limit` |
+| `QUERY_LIMIT` | Batch size per query (legacy: max records) | `100` | `--query-limit` |
+| `TARGET_COUNT` | Target number of records (enables pagination) | None (disabled) | `--target-count` |
+| `TARGET_MODE` | Pagination mode (exact/minimum) | `exact` | `--target-mode` |
 | `PARENT_ID_PREFIX` | Comma-separated ParentId prefixes | None | `--parent-id-prefix` |
 | `PARENT_IDS` | Comma-separated specific ParentIds | None | `--parent-ids` |
 | `FILTER_STRATEGY` | Filtering strategy (python/soql) | `python` | `--filter-strategy` |
@@ -218,6 +256,107 @@ python main.py --org your-org --query-limit 200
 ```
 
 **Default:** 100 records
+
+**Note:** When pagination is enabled (see below), `QUERY_LIMIT` becomes the batch size for each query.
+
+### Pagination (Automatic Multi-Query Fetching)
+
+Fetch more than the single-query limit by enabling pagination. The system will automatically execute multiple SOQL queries with OFFSET to retrieve your target number of records.
+
+#### Configuration
+
+**Via .env file:**
+```bash
+# Enable pagination by setting a target count
+TARGET_COUNT=1000
+
+# Target mode: 'exact' or 'minimum'
+TARGET_MODE=exact
+
+# Batch size for each query (optional, defaults to QUERY_LIMIT)
+QUERY_LIMIT=200
+```
+
+**Via CLI:**
+```bash
+python main.py --org your-org --target-count 1000 --target-mode exact --query-limit 200
+```
+
+#### Target Modes
+
+- **`exact`** (default): Fetches exactly `TARGET_COUNT` records (or all available if less)
+  - Final result is trimmed to match the target precisely
+  - Example: `TARGET_COUNT=1000` → exactly 1000 records returned
+
+- **`minimum`**: Fetches at least `TARGET_COUNT` records (may fetch slightly more)
+  - Keeps all records from all batches
+  - Final count may exceed target by up to one batch size
+  - Example: `TARGET_COUNT=1000`, `QUERY_LIMIT=200` → 1000-1200 records returned
+
+#### How Pagination Works
+
+1. **Batch Calculation**: System calculates required batches: `ceil(TARGET_COUNT / QUERY_LIMIT)`
+2. **Query Execution**: Executes SOQL queries with OFFSET:
+   - Query 1: `LIMIT 200 OFFSET 0`
+   - Query 2: `LIMIT 200 OFFSET 200`
+   - Query 3: `LIMIT 200 OFFSET 400`
+   - Continues until target reached or no more records available
+3. **CSV Merging**: All batches are merged into a single CSV file
+4. **Trimming** (exact mode only): Final results are trimmed to exactly `TARGET_COUNT`
+
+#### Pagination with Filters
+
+Pagination works seamlessly with both filter strategies:
+
+- **Python Strategy** (default): Pagination continues until `TARGET_COUNT` **filtered** matches are found
+  - May fetch more batches if match rate is low
+  - Filters are applied during pagination, not in downloader
+  - Example: `TARGET_COUNT=100`, 20% match rate → fetches ~500 raw records across multiple batches
+
+- **SOQL Strategy**: WHERE clause applied in each paginated query
+  - More efficient for large datasets
+  - Pagination stops when `TARGET_COUNT` matching records are fetched
+
+#### SOQL Limits
+
+- **Single query LIMIT**: 2000 records maximum
+- **OFFSET maximum**: 2000
+- **Maximum retrievable**: ~4000 records total using pagination
+
+If you need more than 4000 records, consider filtering by date ranges or ParentId.
+
+#### Examples
+
+**Fetch 1000 records with exact count:**
+```bash
+python main.py --org your-org --target-count 1000 --target-mode exact --query-limit 200
+# Executes 5 queries (200 × 5 = 1000), returns exactly 1000 records
+```
+
+**Fetch at least 500 records with minimum count:**
+```bash
+python main.py --org your-org --target-count 500 --target-mode minimum --query-limit 200
+# Executes 3 queries (200 × 3 = 600), returns 600 records (full last batch kept)
+```
+
+**Pagination with Python filters:**
+```bash
+python main.py --org your-org --target-count 100 --parent-id-prefix aBo --filter-strategy python
+# Continues querying until 100 filtered matches found
+```
+
+**Pagination disabled (legacy mode):**
+```bash
+python main.py --org your-org --query-limit 100
+# Single query, 100 records maximum (TARGET_COUNT not set)
+```
+
+#### Backward Compatibility
+
+Pagination is **opt-in** and fully backward compatible:
+- If `TARGET_COUNT` is not configured: Uses legacy single-query mode
+- Existing `.env` files work without changes
+- Existing command-line invocations work unchanged
 
 ### Attachment Query
 

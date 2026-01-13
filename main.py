@@ -9,13 +9,16 @@ Runs the complete workflow:
 
 import os
 import sys
+import csv
 import subprocess
 import logging
+from math import ceil
 from pathlib import Path
+from typing import Optional, List, Dict
 from dotenv import load_dotenv
 
 from src.downloader import download_attachments, setup_logging
-from src.filters import parse_filter_config
+from src.filters import parse_filter_config, ParentIdFilter, apply_parent_id_filter
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,8 @@ logger = logging.getLogger(__name__)
 def run_query_script(
     org_alias: str,
     output_dir: Path,
-    query_limit: int = 100
+    query_limit: int = 100,
+    offset: int = 0
 ) -> Path:
     """
     Run the bash script to query attachments.
@@ -32,6 +36,7 @@ def run_query_script(
         org_alias: Salesforce org alias
         output_dir: Directory to save metadata CSV
         query_limit: Maximum number of records to query (default: 100)
+        offset: SOQL OFFSET for pagination (default: 0)
 
     Returns:
         Path to the generated CSV file
@@ -41,7 +46,7 @@ def run_query_script(
         FileNotFoundError: If script or CSV not found
     """
     logger.info("Running attachment query script...")
-    logger.info(f"Query limit: {query_limit}")
+    logger.info(f"Query limit: {query_limit}, offset: {offset}")
 
     script_path = Path(__file__).parent / 'scripts' / 'query_attachments.sh'
 
@@ -51,9 +56,9 @@ def run_query_script(
             f"Please ensure the scripts directory and query_attachments.sh exist."
         )
 
-    # Run script with query limit parameter
+    # Run script with query limit and offset parameters
     result = subprocess.run(
-        ['bash', str(script_path), org_alias, str(output_dir), str(query_limit)],
+        ['bash', str(script_path), org_alias, str(output_dir), str(query_limit), str(offset)],
         capture_output=True,
         text=True
     )
@@ -76,6 +81,278 @@ def run_query_script(
     return csv_files[-1]  # Return most recent
 
 
+def run_paginated_query(
+    org_alias: str,
+    output_dir: Path,
+    target_count: int,
+    batch_size: int,
+    target_mode: str = 'exact',
+    filter_config: Optional[ParentIdFilter] = None
+) -> Path:
+    """
+    Run paginated queries to fetch target number of attachment records.
+
+    Uses SOQL OFFSET to paginate through results. For Python filter strategy,
+    continues fetching until enough filtered matches are found.
+
+    Args:
+        org_alias: Salesforce org alias
+        output_dir: Directory to save merged metadata CSV
+        target_count: Target number of records to fetch
+        batch_size: Number of records per query (QUERY_LIMIT)
+        target_mode: 'exact' (trim to target) or 'minimum' (at least target)
+        filter_config: Optional filter configuration for ParentId filtering
+
+    Returns:
+        Path to the merged CSV file with all paginated records
+
+    Raises:
+        RuntimeError: If queries fail or OFFSET limit exceeded
+        ValueError: If parameters are invalid
+    """
+    if target_count <= 0:
+        raise ValueError(f"TARGET_COUNT must be positive, got {target_count}")
+
+    if batch_size <= 0:
+        raise ValueError(f"QUERY_LIMIT must be positive, got {batch_size}")
+
+    # SOQL OFFSET limit
+    MAX_OFFSET = 2000
+
+    logger.info("=" * 70)
+    logger.info("PAGINATION MODE ENABLED")
+    logger.info("=" * 70)
+    logger.info(f"Target count: {target_count}")
+    logger.info(f"Batch size: {batch_size}")
+    logger.info(f"Target mode: {target_mode}")
+
+    if filter_config and filter_config.has_filters():
+        logger.info(f"Filter config: {filter_config}")
+
+    # Create metadata directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    accumulated_records: List[Dict[str, str]] = []
+    offset = 0
+    batch_num = 1
+    csv_fieldnames: Optional[List[str]] = None
+
+    # Determine if we need to apply Python filtering
+    needs_python_filter = (
+        filter_config and
+        filter_config.has_filters() and
+        filter_config.strategy == 'python'
+    )
+
+    while True:
+        # Check OFFSET limit
+        if offset > MAX_OFFSET:
+            logger.error(
+                f"SOQL OFFSET limit exceeded ({MAX_OFFSET}). "
+                f"Cannot fetch more records. Consider reducing TARGET_COUNT."
+            )
+            raise RuntimeError(f"OFFSET limit {MAX_OFFSET} exceeded")
+
+        # Optimize: if target already reached and not using Python filters, stop
+        if not needs_python_filter and len(accumulated_records) >= target_count:
+            logger.info(f"Target count {target_count} reached. Stopping pagination.")
+            break
+
+        # For Python filters, check filtered count
+        if needs_python_filter:
+            filtered_count = len(accumulated_records)
+            if filtered_count >= target_count:
+                logger.info(
+                    f"Filtered target count {target_count} reached "
+                    f"({filtered_count} filtered records). Stopping pagination."
+                )
+                break
+
+        logger.info(f"Fetching batch {batch_num} (OFFSET {offset}, LIMIT {batch_size})...")
+
+        try:
+            # Execute query for this batch
+            batch_csv_path = run_query_script(
+                org_alias=org_alias,
+                output_dir=output_dir,
+                query_limit=batch_size,
+                offset=offset
+            )
+
+            # Read batch records
+            batch_records = []
+            with batch_csv_path.open('r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+
+                # Capture fieldnames from first batch
+                if csv_fieldnames is None:
+                    csv_fieldnames = reader.fieldnames
+
+                for row in reader:
+                    batch_records.append(row)
+
+            logger.info(f"Batch {batch_num}: Retrieved {len(batch_records)} records")
+
+            # If empty batch, no more records available
+            if len(batch_records) == 0:
+                logger.info("Empty batch received. No more records available.")
+                break
+
+            # Apply Python filter if configured
+            if needs_python_filter:
+                original_count = len(batch_records)
+                batch_records = apply_parent_id_filter(batch_records, filter_config)
+                filtered_count = len(batch_records)
+                logger.info(
+                    f"Batch {batch_num}: Filtered {original_count} → {filtered_count} records"
+                )
+
+            # Accumulate records
+            accumulated_records.extend(batch_records)
+
+            # Update counters
+            offset += batch_size
+            batch_num += 1
+
+            # For exact mode without filters: trim if we exceeded target
+            if not needs_python_filter and target_mode == 'exact':
+                if len(accumulated_records) >= target_count:
+                    break
+
+            # For minimum mode: stop when we have at least target count
+            if target_mode == 'minimum' and len(accumulated_records) >= target_count:
+                logger.info(
+                    f"Minimum target {target_count} reached "
+                    f"(have {len(accumulated_records)} records). Stopping pagination."
+                )
+                break
+
+        except Exception as e:
+            logger.error(f"Error during pagination at batch {batch_num}: {e}")
+            raise
+
+    # Apply target mode trimming for 'exact' mode
+    total_fetched = len(accumulated_records)
+
+    if target_mode == 'exact' and total_fetched > target_count:
+        logger.info(f"Trimming {total_fetched} records to exactly {target_count}")
+        accumulated_records = accumulated_records[:target_count]
+
+    final_count = len(accumulated_records)
+
+    logger.info("=" * 70)
+    logger.info("PAGINATION SUMMARY")
+    logger.info("=" * 70)
+    logger.info(f"Total batches fetched: {batch_num - 1}")
+    logger.info(f"Target count: {target_count}")
+    logger.info(f"Final record count: {final_count}")
+
+    if final_count < target_count:
+        logger.warning(
+            f"Fetched only {final_count} records (target was {target_count}). "
+            f"All available records have been retrieved."
+        )
+
+    # Write merged CSV
+    from datetime import datetime
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    merged_csv_path = output_dir / f"attachments_{timestamp}_paginated.csv"
+
+    logger.info(f"Writing merged CSV: {merged_csv_path}")
+
+    with merged_csv_path.open('w', encoding='utf-8', newline='') as f:
+        if csv_fieldnames:
+            writer = csv.DictWriter(f, fieldnames=csv_fieldnames)
+            writer.writeheader()
+            writer.writerows(accumulated_records)
+        else:
+            logger.warning("No fieldnames captured, empty CSV written")
+
+    logger.info(f"Merged CSV created with {final_count} records")
+
+    return merged_csv_path
+
+
+def validate_metadata_csv(csv_path: Path) -> tuple[bool, Optional[str]]:
+    """
+    Validate that a CSV file has the required structure for attachment metadata.
+
+    Checks that the file exists, is readable, and contains the required columns
+    (Id, Name) needed for downloading attachments.
+
+    Args:
+        csv_path: Path to the CSV file to validate
+
+    Returns:
+        Tuple of (is_valid, error_message)
+        - is_valid: True if CSV is valid, False otherwise
+        - error_message: None if valid, error description if invalid
+
+    Example:
+        >>> is_valid, error = validate_metadata_csv(Path("data.csv"))
+        >>> if not is_valid:
+        ...     print(f"Invalid CSV: {error}")
+    """
+    # Check file exists
+    if not csv_path.exists():
+        return False, f"CSV file not found: {csv_path.absolute()}"
+
+    # Check file is readable
+    if not csv_path.is_file():
+        return False, f"Path is not a file: {csv_path.absolute()}"
+
+    try:
+        # Try to read and validate structure
+        with csv_path.open('r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+
+            # Check if file is empty
+            fieldnames = reader.fieldnames
+            if not fieldnames:
+                return False, "CSV file is empty or has no header row"
+
+            # Check required columns
+            required_columns = ['Id', 'Name']
+            recommended_columns = ['ParentId']  # Recommended for filtering
+
+            missing_required = [col for col in required_columns if col not in fieldnames]
+            missing_recommended = [col for col in recommended_columns if col not in fieldnames]
+
+            if missing_required:
+                return False, (
+                    f"CSV is missing required columns: {', '.join(missing_required)}. "
+                    f"Found columns: {', '.join(fieldnames)}. "
+                    f"Expected format from Salesforce query with columns: Id, Name, ContentType, BodyLength, ParentId, etc."
+                )
+
+            # Warn about missing recommended columns (don't fail validation)
+            if missing_recommended:
+                logger.warning(
+                    f"CSV is missing recommended column(s): {', '.join(missing_recommended)}. "
+                    f"Filtering by ParentId will not be possible."
+                )
+
+            # Check if CSV has any data rows
+            try:
+                first_row = next(reader)
+                # Validate that Id and Name are not empty in first row
+                if not first_row.get('Id') or not first_row.get('Id').strip():
+                    return False, "CSV has empty 'Id' field in first data row"
+                if not first_row.get('Name') or not first_row.get('Name').strip():
+                    return False, "CSV has empty 'Name' field in first data row"
+            except StopIteration:
+                return False, "CSV has header but no data rows"
+
+        return True, None
+
+    except UnicodeDecodeError:
+        return False, f"CSV file has invalid encoding. Expected UTF-8."
+    except csv.Error as e:
+        return False, f"CSV parsing error: {e}"
+    except Exception as e:
+        return False, f"Unexpected error reading CSV: {e}"
+
+
 def main():
     """
     Main entry point for the Salesforce Attachments Extract workflow.
@@ -93,6 +370,7 @@ def main():
     env_output_dir = os.getenv('OUTPUT_DIR', './output')
     env_log_file = os.getenv('LOG_FILE', './logs/download.log')
     env_chunk_size = os.getenv('CHUNK_SIZE', '8192')
+    env_metadata_csv = os.getenv('METADATA_CSV')
 
     # Filter configuration from .env
     env_parent_id_prefix = os.getenv('PARENT_ID_PREFIX')
@@ -101,6 +379,10 @@ def main():
 
     # Query limit from .env
     env_query_limit = os.getenv('QUERY_LIMIT', '100')
+
+    # Pagination configuration from .env
+    env_target_count = os.getenv('TARGET_COUNT', '')
+    env_target_mode = os.getenv('TARGET_MODE', 'exact')
 
     # Validate and convert CHUNK_SIZE to int
     try:
@@ -115,6 +397,23 @@ def main():
     except ValueError:
         logger.warning(f"Invalid QUERY_LIMIT value '{env_query_limit}', using default 100")
         default_query_limit = 100
+
+    # Validate and convert TARGET_COUNT to int (optional)
+    default_target_count = None
+    if env_target_count and env_target_count.strip():
+        try:
+            default_target_count = int(env_target_count)
+            if default_target_count <= 0:
+                logger.warning(f"TARGET_COUNT must be positive, got {default_target_count}. Pagination disabled.")
+                default_target_count = None
+        except ValueError:
+            logger.warning(f"Invalid TARGET_COUNT value '{env_target_count}', pagination disabled")
+            default_target_count = None
+
+    # Validate TARGET_MODE
+    if env_target_mode not in ['exact', 'minimum']:
+        logger.warning(f"Invalid TARGET_MODE value '{env_target_mode}', using default 'exact'")
+        env_target_mode = 'exact'
 
     parser = argparse.ArgumentParser(
         description='Query and download Salesforce attachments (POC)'
@@ -134,12 +433,13 @@ def main():
     parser.add_argument(
         '--skip-query',
         action='store_true',
-        help='Skip query step and use existing metadata CSV'
+        help='(Deprecated) Skip query step - use --metadata instead'
     )
     parser.add_argument(
         '--metadata',
-        type=Path,
-        help='Path to existing metadata CSV (used with --skip-query)'
+        type=lambda p: Path(p) if p else None,
+        default=Path(env_metadata_csv) if env_metadata_csv and env_metadata_csv.strip() else None,
+        help='Path to existing metadata CSV (skips Salesforce query)'
     )
     parser.add_argument(
         '--parent-id-prefix',
@@ -164,7 +464,20 @@ def main():
         '--query-limit',
         type=int,
         default=default_query_limit,
-        help=f'Maximum number of records to query (default: {default_query_limit})'
+        help=f'Maximum number of records to query per batch (default: {default_query_limit})'
+    )
+    parser.add_argument(
+        '--target-count',
+        type=int,
+        default=default_target_count,
+        help='Target number of attachments to retrieve using pagination (optional)'
+    )
+    parser.add_argument(
+        '--target-mode',
+        type=str,
+        choices=['exact', 'minimum'],
+        default=env_target_mode,
+        help='Target mode: exact (trim to TARGET_COUNT) or minimum (at least TARGET_COUNT)'
     )
 
     args = parser.parse_args()
@@ -190,26 +503,76 @@ def main():
         else:
             logger.info("No filtering configured - will download all attachments")
 
-        # Step 1: Query attachments (unless skipped)
-        if args.skip_query:
-            if not args.metadata or not args.metadata.exists():
-                logger.error("--skip-query requires valid --metadata path")
+        # Step 1: Query attachments (or use provided CSV)
+        if args.metadata:
+            # User provided existing CSV - validate and use it
+            logger.info("=" * 70)
+            logger.info("USING PROVIDED METADATA CSV")
+            logger.info("=" * 70)
+            logger.info(f"CSV file: {args.metadata}")
+
+            # Validate CSV structure
+            is_valid, error_msg = validate_metadata_csv(args.metadata)
+            if not is_valid:
+                logger.error("=" * 70)
+                logger.error("CSV VALIDATION FAILED")
+                logger.error("=" * 70)
+                logger.error(f"Error: {error_msg}")
+                logger.error("")
+                logger.error("Please ensure your CSV file:")
+                logger.error("  1. Exists and is readable")
+                logger.error("  2. Has a header row with column names")
+                logger.error("  3. Contains required columns: 'Id' and 'Name'")
+                logger.error("  4. Contains recommended column: 'ParentId' (needed for filtering)")
+                logger.error("  5. Has at least one data row")
+                logger.error("  6. Is UTF-8 encoded")
+                logger.error("")
+                logger.error("You can generate a valid CSV by querying Salesforce:")
+                logger.error(f"  python {sys.argv[0]} --org your-org --query-limit 100")
                 sys.exit(1)
+
             csv_path = args.metadata
-            logger.info(f"Using existing metadata: {csv_path}")
+            logger.info("✓ CSV validation passed")
+            logger.info(f"✓ Ready to download attachments from metadata")
         else:
+            # No CSV provided - query from Salesforce
             metadata_dir = args.output / 'metadata'
-            csv_path = run_query_script(args.org, metadata_dir, args.query_limit)
+
+            # Check if pagination is configured
+            if args.target_count and args.target_count > 0:
+                logger.info(f"Pagination enabled: target={args.target_count}, mode={args.target_mode}")
+                csv_path = run_paginated_query(
+                    org_alias=args.org,
+                    output_dir=metadata_dir,
+                    target_count=args.target_count,
+                    batch_size=args.query_limit,
+                    target_mode=args.target_mode,
+                    filter_config=filter_config
+                )
+            else:
+                # Legacy single query mode
+                logger.info("Single query mode (pagination disabled)")
+                csv_path = run_query_script(args.org, metadata_dir, args.query_limit)
+
             logger.info(f"Generated metadata: {csv_path}")
 
         # Step 2: Download files
         files_dir = args.output / 'files'
+
+        # If pagination was used with Python filters, filters were already applied
+        # Don't apply them again in the downloader
+        downloader_filter_config = filter_config
+        if args.target_count and args.target_count > 0:
+            if filter_config and filter_config.strategy == 'python':
+                logger.info("Python filters already applied during pagination - skipping filter in downloader")
+                downloader_filter_config = None
+
         stats = download_attachments(
             metadata_csv=csv_path,
             output_dir=files_dir,
             org_alias=args.org,
             chunk_size=chunk_size,
-            filter_config=filter_config
+            filter_config=downloader_filter_config
         )
 
         # Final summary

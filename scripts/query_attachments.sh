@@ -7,6 +7,7 @@
 ORG_ALIAS="${1:-ems-prod}"
 OUTPUT_DIR="${2:-./output/metadata}"
 QUERY_LIMIT="${3:-100}"
+OFFSET="${4:-0}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_FILE="${OUTPUT_DIR}/attachments_${TIMESTAMP}.csv"
 
@@ -25,8 +26,9 @@ mkdir -p "$OUTPUT_DIR"
 # - Description: Optional description
 #
 # Query limit: Configurable via parameter (default: 100)
+# OFFSET: Configurable via parameter for pagination (default: 0)
 
-QUERY="SELECT Id, Name, ContentType, BodyLength, ParentId, CreatedDate, LastModifiedDate, Description FROM Attachment ORDER BY CreatedDate DESC LIMIT ${QUERY_LIMIT}"
+QUERY="SELECT Id, Name, ContentType, BodyLength, ParentId, CreatedDate, LastModifiedDate, Description FROM Attachment ORDER BY CreatedDate DESC LIMIT ${QUERY_LIMIT} OFFSET ${OFFSET}"
 
 # Execute query and export to CSV
 echo "========================================"
@@ -34,6 +36,7 @@ echo "Salesforce Attachments Query"
 echo "========================================"
 echo "Org: $ORG_ALIAS"
 echo "Query Limit: $QUERY_LIMIT"
+echo "Offset: $OFFSET"
 echo "Output: $OUTPUT_FILE"
 echo ""
 
