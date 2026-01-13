@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# Output directories
+output/
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+
+# Environment variables (SECURITY: Never commit these!)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+.env.staging
+
+# Sensitive files
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+secrets.json
+config.local.*
+
+# Salesforce CLI auth files
+.sfdx/
+.sf/
