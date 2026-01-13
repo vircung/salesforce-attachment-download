@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from src.sf_auth import get_sf_auth_info, SFAuthError
-from src.sf_client import SalesforceClient, SFAPIError
-from src.filters import ParentIdFilter, apply_parent_id_filter, log_filter_summary
+from src.api.sf_auth import get_sf_auth_info, SFAuthError
+from src.api.sf_client import SalesforceClient, SFAPIError
+from src.query.filters import ParentIdFilter, apply_parent_id_filter, log_filter_summary
 
 
 def setup_logging(log_file: Path) -> None:
