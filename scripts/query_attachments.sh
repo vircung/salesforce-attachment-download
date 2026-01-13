@@ -8,6 +8,7 @@ ORG_ALIAS="${1:-ems-prod}"
 OUTPUT_DIR="${2:-./output/metadata}"
 QUERY_LIMIT="${3:-100}"
 OFFSET="${4:-0}"
+WHERE_CLAUSE="${5:-}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_FILE="${OUTPUT_DIR}/attachments_${TIMESTAMP}.csv"
 
@@ -25,10 +26,17 @@ mkdir -p "$OUTPUT_DIR"
 # - LastModifiedDate: Last modification timestamp
 # - Description: Optional description
 #
-# Query limit: Configurable via parameter (default: 100)
-# OFFSET: Configurable via parameter for pagination (default: 0)
+# Two modes:
+# 1. CSV-records mode: Uses WHERE clause (parameter 5) to filter by ParentId
+# 2. Standard mode: Uses LIMIT/OFFSET for pagination
 
-QUERY="SELECT Id, Name, ContentType, BodyLength, ParentId, CreatedDate, LastModifiedDate, Description FROM Attachment ORDER BY CreatedDate DESC LIMIT ${QUERY_LIMIT} OFFSET ${OFFSET}"
+if [ -n "$WHERE_CLAUSE" ]; then
+    # CSV-records mode: Use provided WHERE clause
+    QUERY="SELECT Id, Name, ContentType, BodyLength, ParentId, CreatedDate, LastModifiedDate, Description FROM Attachment ${WHERE_CLAUSE} ORDER BY ParentId, CreatedDate DESC"
+else
+    # Standard mode: Use LIMIT/OFFSET pagination
+    QUERY="SELECT Id, Name, ContentType, BodyLength, ParentId, CreatedDate, LastModifiedDate, Description FROM Attachment ORDER BY CreatedDate DESC LIMIT ${QUERY_LIMIT} OFFSET ${OFFSET}"
+fi
 
 # Execute query and export to CSV
 echo "========================================"
