@@ -1,21 +1,32 @@
 #!/bin/bash
 
-# Salesforce Attachments Query Script
-# Queries attachments and exports to CSV using Salesforce CLI
+# Salesforce Attachments Query Script (CSV Mode Only)
+# Queries attachments with WHERE clause filter and exports to CSV
 
-# Configuration
-ORG_ALIAS="${1:-ems-prod}"
-OUTPUT_DIR="${2:-./output/metadata}"
-QUERY_LIMIT="${3:-100}"
-OFFSET="${4:-0}"
-WHERE_CLAUSE="${5:-}"
+# Required Parameters
+ORG_ALIAS="${1}"
+OUTPUT_DIR="${2}"
+WHERE_CLAUSE="${3}"
+
+# Validate required parameters
+if [ -z "$ORG_ALIAS" ] || [ -z "$OUTPUT_DIR" ] || [ -z "$WHERE_CLAUSE" ]; then
+    echo "Error: Missing required parameters"
+    echo ""
+    echo "Usage: $0 <org_alias> <output_dir> <where_clause>"
+    echo ""
+    echo "Example:"
+    echo "  $0 my-org ./output/metadata \"WHERE ParentId IN ('001xxx','002yyy')\""
+    echo ""
+    exit 1
+fi
+
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_FILE="${OUTPUT_DIR}/attachments_${TIMESTAMP}.csv"
 
 # Create output directory if it doesn't exist
 mkdir -p "$OUTPUT_DIR"
 
-# SOQL Query for attachments
+# SOQL Query for attachments with WHERE clause
 # Fields:
 # - Id: Unique identifier
 # - Name: File name
@@ -25,27 +36,16 @@ mkdir -p "$OUTPUT_DIR"
 # - CreatedDate: Creation timestamp
 # - LastModifiedDate: Last modification timestamp
 # - Description: Optional description
-#
-# Two modes:
-# 1. CSV-records mode: Uses WHERE clause (parameter 5) to filter by ParentId
-# 2. Standard mode: Uses LIMIT/OFFSET for pagination
 
-if [ -n "$WHERE_CLAUSE" ]; then
-    # CSV-records mode: Use provided WHERE clause
-    QUERY="SELECT Id, Name, ContentType, BodyLength, ParentId, CreatedDate, LastModifiedDate, Description FROM Attachment ${WHERE_CLAUSE} ORDER BY ParentId, CreatedDate DESC"
-else
-    # Standard mode: Use LIMIT/OFFSET pagination
-    QUERY="SELECT Id, Name, ContentType, BodyLength, ParentId, CreatedDate, LastModifiedDate, Description FROM Attachment ORDER BY CreatedDate DESC LIMIT ${QUERY_LIMIT} OFFSET ${OFFSET}"
-fi
+QUERY="SELECT Id, Name, ContentType, BodyLength, ParentId, CreatedDate, LastModifiedDate, Description FROM Attachment ${WHERE_CLAUSE} ORDER BY ParentId, CreatedDate DESC"
 
 # Execute query and export to CSV
 echo "========================================"
-echo "Salesforce Attachments Query"
+echo "Salesforce Attachments Query (CSV Mode)"
 echo "========================================"
 echo "Org: $ORG_ALIAS"
-echo "Query Limit: $QUERY_LIMIT"
-echo "Offset: $OFFSET"
 echo "Output: $OUTPUT_FILE"
+echo "Filter: ${WHERE_CLAUSE:0:100}..."
 echo ""
 
 sf data query \
@@ -68,5 +68,6 @@ else
     echo "  - Salesforce CLI is installed"
     echo "  - You are authenticated (run: sf org display --target-org $ORG_ALIAS)"
     echo "  - The org alias '$ORG_ALIAS' is correct"
+    echo "  - The WHERE clause is valid SOQL syntax"
     exit 1
 fi
