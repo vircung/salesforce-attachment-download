@@ -40,11 +40,6 @@ Tool to download Salesforce Attachment records and files using CSV-based record 
    pip install -r requirements.txt
    ```
 
-3. Make scripts executable:
-   ```bash
-   chmod +x scripts/query_attachments.sh
-   ```
-
 ## Usage
 
 ### Quick Start (CSV Workflow)
@@ -203,7 +198,8 @@ python main.py --org your-org --records-dir ./records --batch-size 150
 **Notes:**
 - Larger batches = fewer queries but longer query execution time
 - Smaller batches = more queries but faster individual queries
-- Salesforce has SOQL query limits; adjust based on your org's limits
+- Salesforce has SOQL query length limits (~20,000 characters)
+- If you get "query too long" errors, reduce --batch-size to 50 or lower
 
 ## Logging
 
@@ -220,6 +216,9 @@ The tool handles:
 - Disk write errors
 - Authentication expiry
 - Invalid CSV files
+- SOQL query length exceeded (with helpful suggestions to reduce batch size)
+- Invalid SOQL syntax
+- Insufficient permissions
 
 Failed downloads are logged but don't stop the process.
 
@@ -259,12 +258,16 @@ Ensure your sf CLI user has:
 - Read access to Attachment object
 - View All Data or appropriate object permissions
 
-### Script not executable
+### "SOQL query too long" error
 
-Make the script executable:
+The query exceeds Salesforce's ~20,000 character limit. This happens when batch size is too large.
+
+**Solution:**
 ```bash
-chmod +x scripts/query_attachments.sh
+python main.py --org your-org --records-dir ./records --batch-size 50
 ```
+
+Reduce --batch-size until the error disappears. Each Salesforce ID (18 chars) adds ~22 characters to the query.
 
 ### "Error: --records-dir is required"
 
@@ -312,24 +315,24 @@ attachments-extract/
 ├── CLAUDE.md                    # Project specifications
 ├── src/
 │   ├── __init__.py
+│   ├── exceptions.py           # Custom exceptions
 │   ├── workflows/
 │   │   └── csv_records.py      # CSV workflow orchestration
 │   ├── csv/
 │   │   ├── processor.py        # CSV file processing
 │   │   └── validator.py        # CSV validation
 │   ├── query/
-│   │   ├── executor.py         # Query execution
+│   │   ├── executor.py         # Query execution wrapper
+│   │   ├── soql.py             # Native SOQL execution via sf CLI
 │   │   └── filters.py          # WHERE clause building
 │   ├── download/
 │   │   └── downloader.py       # Download orchestration
 │   ├── api/
-│   │   ├── auth.py             # SF CLI authentication
-│   │   └── client.py           # REST API client
+│   │   ├── sf_auth.py          # SF CLI authentication
+│   │   └── sf_client.py        # REST API client
 │   ├── cli/
 │   │   └── config.py           # CLI argument parsing
 │   └── utils.py                # Logging utilities
-├── scripts/
-│   └── query_attachments.sh    # SOQL query script
 ├── records/                     # CSV files with record IDs (user-provided)
 ├── output/
 │   ├── metadata/               # CSV files with attachment metadata

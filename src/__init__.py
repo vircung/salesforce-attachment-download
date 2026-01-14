@@ -3,7 +3,7 @@
 # Expose key components at package level for convenience
 
 # Exceptions (centralized)
-from src.exceptions import SalesforceError, SFAuthError, SFAPIError
+from src.exceptions import SalesforceError, SFAuthError, SFAPIError, SFQueryError
 
 # API
 from src.api.sf_auth import get_sf_auth_info
@@ -12,6 +12,7 @@ from src.api.sf_client import SalesforceClient
 # Query
 from src.query.filters import ParentIdFilter, apply_parent_id_filter, build_soql_where_clause
 from src.query.executor import run_query_script_with_filter
+from src.query.soql import execute_soql_query, query_attachments_with_filter, build_attachment_query
 
 # CSV
 from src.csv.processor import CsvRecordInfo, process_records_directory
@@ -38,6 +39,7 @@ __all__ = [
     "SalesforceError",
     "SFAuthError",
     "SFAPIError",
+    "SFQueryError",
     # API
     "get_sf_auth_info",
     "SalesforceClient",
@@ -46,6 +48,9 @@ __all__ = [
     "apply_parent_id_filter",
     "build_soql_where_clause",
     "run_query_script_with_filter",
+    "execute_soql_query",
+    "query_attachments_with_filter",
+    "build_attachment_query",
     # CSV
     "CsvRecordInfo",
     "process_records_directory",

@@ -31,3 +31,15 @@ class SFAPIError(SalesforceError):
     - Network errors
     """
     pass
+
+
+class SFQueryError(SalesforceError):
+    """Exception for SOQL query execution errors.
+
+    Raised when:
+    - SOQL query syntax is invalid
+    - Query length exceeds Salesforce limits
+    - Insufficient permissions to query objects
+    - sf data query command fails
+    """
+    pass

@@ -74,9 +74,8 @@ def parse_arguments():
     parser.add_argument(
         '--records-dir',
         type=Path,
-        default=None,
-        required=True,
-        help='Directory containing CSV files with record IDs (column: Id). Required for CSV-based processing.'
+        default=Path(env_records_dir) if env_records_dir else None,
+        help=f'Directory containing CSV files with record IDs (column: Id). Required for CSV-based processing. (default: {env_records_dir or "not set"})'
     )
     parser.add_argument(
         '--batch-size',
