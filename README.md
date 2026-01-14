@@ -1,6 +1,9 @@
 # Salesforce Attachments Downloader
 
-Tool to download Salesforce Attachment records and files using CSV-based record processing.
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+
+A Python CLI tool for downloading Salesforce Attachment records and files using CSV-based record processing.
 
 ## Features
 
@@ -309,13 +312,13 @@ Failed downloads are logged but don't stop the process.
 --debug             Enable debug console output (DEBUG level with technical details)
 ```
 
-## Limitations
+## Current Limitations
 
-- No parallel downloads (sequential processing)
-- No resume capability
-- Basic error handling (no exponential backoff)
-- No support for ContentDocument (newer file storage)
-- Batch size limited by SOQL WHERE clause limits
+- Sequential processing (no parallel downloads)
+- No resume capability for interrupted sessions
+- Basic error handling without exponential backoff
+- Support limited to Attachment object (ContentDocument not yet supported)
+- Batch size constrained by SOQL WHERE clause character limits
 
 ## Troubleshooting
 
@@ -423,15 +426,21 @@ attachments-extract/
     └── download.log            # Execution logs
 ```
 
-## Future Enhancements
+## Roadmap
 
-- Support for ContentDocument/ContentVersion
-- Parallel downloads
-- Resume capability
-- Progress bars
-- Retry with exponential backoff
-- Advanced filtering (date range, content type, file size)
+Potential improvements for future releases:
+
+- **ContentDocument/ContentVersion support** - Handle newer Salesforce file storage
+- **Parallel downloads** - Concurrent file downloads for improved performance
+- **Resume capability** - Continue interrupted downloads from where they stopped
+- **Progress bars** - Visual feedback with progress indicators (e.g., tqdm)
+- **Retry with exponential backoff** - Automatic retry mechanism for transient failures
+- **Advanced filtering** - Filter by date range, content type, file size, and other metadata
 
 ## License
 
-This is a proof-of-concept tool. Adapt as needed for your use case.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
