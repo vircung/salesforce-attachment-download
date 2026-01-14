@@ -158,6 +158,10 @@ The tool supports loading configuration from a `.env` file in the project root d
 
    # Batch size for SOQL queries
    BATCH_SIZE=100
+
+   # Console logging configuration
+   VERBOSE=false
+   DEBUG=false
    ```
 
 3. **IMPORTANT**: Never commit the `.env` file to version control!
@@ -172,6 +176,8 @@ The tool supports loading configuration from a `.env` file in the project root d
 | `LOG_FILE` | Log file path | `./logs/download.log` | N/A |
 | `CHUNK_SIZE` | Download chunk size in bytes | `8192` | N/A |
 | `BATCH_SIZE` | Number of ParentIds per query batch | `100` | `--batch-size` |
+| `VERBOSE` | Enable verbose console output (INFO level) | `false` | `--verbose` |
+| `DEBUG` | Enable debug console output (DEBUG level) | `false` | `--debug` |
 
 **Configuration Precedence:**
 
@@ -203,13 +209,83 @@ python main.py --org your-org --records-dir ./records --batch-size 150
 
 ## Logging
 
+The tool provides flexible logging with different verbosity levels:
+
+### Log Levels
+
+**Default (INFO level):**
+- Console shows main workflow progress, file download status, and results
+- Log file contains all DEBUG details for troubleshooting
+
+```bash
+python main.py --org my-org --records-dir ./records
+```
+
+**Verbose mode (--verbose):**
+- Alias for default behavior (kept for compatibility)
+- Shows INFO level logs on console
+
+```bash
+python main.py --org my-org --records-dir ./records --verbose
+```
+
+**Debug mode (--debug):**
+- Console shows all technical details: URLs, query previews, authentication details, etc.
+- Useful for troubleshooting issues
+
+```bash
+python main.py --org my-org --records-dir ./records --debug
+```
+
+### Log Configuration
+
+**Via .env file:**
+```bash
+VERBOSE=false  # Enable INFO level (same as default)
+DEBUG=false    # Enable DEBUG level with technical details
+```
+
+**Via CLI flags:**
+```bash
+--verbose      # Enable verbose output (INFO level)
+--debug        # Enable debug output (DEBUG level)
+```
+
+### Log Output
+
 Logs are written to:
-- **Console**: INFO level and above
-- **File**: `./logs/download.log` (all levels)
+- **Console**: Configurable level (INFO by default, DEBUG with --debug)
+- **File**: `./logs/download.log` (always DEBUG level with full details)
+
+### What You'll See
+
+**Default output:**
+```
+INFO - SALESFORCE ATTACHMENTS DOWNLOADER - CSV WORKFLOW
+INFO - Found 1 CSV file(s): 20 records in 1 batch(es)
+INFO - Batch 1/1: Querying 20 ParentId(s)
+INFO - ✓ Query successful: 20 records
+INFO - No filename collisions detected
+INFO - Downloading 20 attachment(s)...
+INFO - [1/20] invoice.pdf
+INFO -   ✓ Downloaded
+INFO - [2/20] receipt.pdf
+INFO -   ⊙ Skipped (already exists)
+INFO - Download complete: 1 downloaded, 19 skipped, 0 failed
+INFO - WORKFLOW COMPLETE
+```
+
+**Debug output adds:**
+- CSV file processing details
+- SOQL query preview and length
+- WHERE clause content
+- Authentication details
+- URL endpoints
+- Bytes downloaded per file
 
 ## Error Handling
 
-The tool handles:
+The tool gracefully handles errors and provides clear error messages:
 - Missing attachments (404 errors)
 - Network failures
 - Invalid filenames
@@ -229,6 +305,8 @@ Failed downloads are logged but don't stop the process.
 --records-dir       Directory containing CSV files with record IDs (REQUIRED)
 --output            Base output directory (default: ./output)
 --batch-size        Number of ParentIds per SOQL query batch (default: 100)
+--verbose           Enable verbose console output (INFO level)
+--debug             Enable debug console output (DEBUG level with technical details)
 ```
 
 ## Limitations
