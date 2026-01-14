@@ -8,9 +8,10 @@ based on CSV metadata file.
 import csv
 import logging
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from src.api.sf_auth import get_sf_auth_info, SFAuthError
 from src.api.sf_client import SalesforceClient, SFAPIError
@@ -41,6 +42,9 @@ logger = logging.getLogger(__name__)
 
 # Maximum filename length supported by most filesystems
 MAX_FILENAME_LENGTH = 255
+
+# Default value for attachments without ParentId
+DEFAULT_PARENT_ID = 'NO_PARENT'
 
 
 @dataclass
@@ -105,7 +109,7 @@ def read_metadata_csv(csv_path: Path) -> List[Dict[str, str]]:
 
     Raises:
         FileNotFoundError: If CSV file does not exist
-        ValueError: If CSV is missing required columns (Id, Name)
+        ValueError: If CSV is missing required columns (Id, Name, ParentId)
     """
     logger.info(f"Reading metadata from: {csv_path}")
 
@@ -120,7 +124,7 @@ def read_metadata_csv(csv_path: Path) -> List[Dict[str, str]]:
         reader = csv.DictReader(f)
 
         # Validate required columns
-        required_cols = ['Id', 'Name']
+        required_cols = ['Id', 'Name', 'ParentId']
         if not all(col in reader.fieldnames for col in required_cols):
             raise ValueError(f"CSV missing required columns: {required_cols}")
 
@@ -129,6 +133,48 @@ def read_metadata_csv(csv_path: Path) -> List[Dict[str, str]]:
 
     logger.info(f"Found {len(attachments)} attachments in metadata")
     return attachments
+
+
+def detect_filename_collisions(attachments: List[Dict[str, str]]) -> Dict[Tuple[str, str], bool]:
+    """
+    Detect filename collisions within the same ParentId.
+    Uses lowercase comparison for collision detection to be filesystem-agnostic.
+
+    Args:
+        attachments: List of attachment dictionaries with Id, ParentId, Name
+
+    Returns:
+        Dict with keys as (parent_id, safe_filename_lowercase) and values as bool
+        True = collision detected (use ParentId + Id prefix)
+        False = no collision (use ParentId prefix only)
+    """
+    occurrence_count: Dict[Tuple[str, str], int] = defaultdict(int)
+
+    for attachment in attachments:
+        parent_id = attachment.get('ParentId', DEFAULT_PARENT_ID)
+        original_name = attachment.get('Name', 'unnamed')
+        safe_name = sanitize_filename(original_name)
+        
+        # Use lowercase for collision detection (filesystem-agnostic)
+        key = (parent_id, safe_name.lower())
+        occurrence_count[key] += 1
+    
+    collision_map: Dict[Tuple[str, str], bool] = {
+        key: (count > 1)
+        for key, count in occurrence_count.items()
+    }
+    
+    # Log collision statistics
+    total_collisions = sum(1 for has_collision in collision_map.values() if has_collision)
+    if total_collisions > 0:
+        logger.warning(
+            f"Detected {total_collisions} filename collision(s) - "
+            f"will use Id prefix for these files"
+        )
+    else:
+        logger.info("No filename collisions detected")
+    
+    return collision_map
 
 
 def download_attachments(
@@ -200,6 +246,12 @@ def download_attachments(
 
             stats.total = len(attachments)
 
+            # Step 3.6: Detect filename collisions
+            log_section_header("STEP 3.6: Analyzing filename collisions")
+
+            collision_map = detect_filename_collisions(attachments)
+            logger.info(f"Collision analysis complete for {len(attachments)} attachments")
+
             # Step 4: Download files
             log_section_header(f"STEP 4: Downloading {stats.total} attachments", width=60)
 
@@ -207,13 +259,22 @@ def download_attachments(
 
             for idx, attachment in enumerate(attachments, 1):
                 attachment_id = attachment['Id']
+                parent_id = attachment.get('ParentId', DEFAULT_PARENT_ID)
                 original_name = attachment['Name']
 
                 # Sanitize filename and construct output path
                 safe_name = sanitize_filename(original_name)
 
-                # Include ID prefix to ensure uniqueness
-                output_filename = f"{attachment_id}_{safe_name}"
+                # Check if this file has a collision (using lowercase comparison)
+                collision_key = (parent_id, safe_name.lower())
+                has_collision = collision_map.get(collision_key, False)
+                
+                # Determine new format filename based on collision detection
+                if has_collision:
+                    output_filename = f"{parent_id}_{attachment_id}_{safe_name}"
+                else:
+                    output_filename = f"{parent_id}_{safe_name}"
+                
                 output_path = output_dir / output_filename
 
                 # Path traversal validation

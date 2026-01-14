@@ -94,7 +94,7 @@ def parse_arguments():
         default_batch_size = 100
 
     parser = argparse.ArgumentParser(
-        description='Query and download Salesforce attachments (POC)'
+        description='Query and download Salesforce attachments'
     )
     parser.add_argument(
         '--org',

@@ -1,4 +1,4 @@
-# Salesforce Attachments Extract - POC
+# Salesforce Attachments Extract
 
 Proof of concept tool to download Salesforce Attachment records and files.
 

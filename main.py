@@ -32,7 +32,7 @@ def main():
     setup_logging(args.log_file)
 
     logger.info("=" * 70)
-    logger.info("SALESFORCE ATTACHMENTS EXTRACT - POC")
+    logger.info("SALESFORCE ATTACHMENTS EXTRACT")
     logger.info("=" * 70)
 
     try:
