@@ -14,7 +14,7 @@ from src.api.sf_auth import get_sf_auth_info
 from src.api.sf_client import SalesforceClient
 from src.exceptions import SFAuthError, SFAPIError
 from src.query.filters import ParentIdFilter, apply_parent_id_filter, log_filter_summary
-from src.utils import log_section_header, setup_logging
+from src.utils import log_section_header
 
 from .stats import DownloadStats
 from .metadata import read_metadata_csv

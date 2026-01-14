@@ -9,7 +9,7 @@ import csv
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Any
 
 from src.query.executor import run_query_script_with_filter
 from src.query.filters import ParentIdFilter, build_soql_where_clause
@@ -31,7 +31,7 @@ def process_csv_records_workflow(
     records_dir: Path,
     batch_size: int = 100,
     download: bool = True
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Process CSV files containing record IDs and download their attachments.
 

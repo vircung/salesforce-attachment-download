@@ -175,7 +175,7 @@ def apply_parent_id_filter(
         if filter_config.exact_ids and parent_id in filter_config.exact_ids:
             filtered.append(attachment)
             match_stats['exact'] += 1
-            logger.debug(f"Matched exact ID: {parent_id} for {attachment.get('Name')}")
+            logger.debug(f"Matched exact ID: {parent_id} for {attachment.get('Name', 'unnamed')}")
             continue
 
         # Check prefix match
@@ -184,7 +184,7 @@ def apply_parent_id_filter(
             if parent_prefix in filter_config.prefixes:
                 filtered.append(attachment)
                 match_stats['prefix'] += 1
-                logger.debug(f"Matched prefix: {parent_prefix} for {attachment.get('Name')}")
+                logger.debug(f"Matched prefix: {parent_prefix} for {attachment.get('Name', 'unnamed')}")
                 continue
 
     logger.info(f"Post-filter count: {len(filtered)} attachments")

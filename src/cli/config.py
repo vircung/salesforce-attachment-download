@@ -22,7 +22,6 @@ def parse_arguments():
         argparse.Namespace: Parsed arguments with additional attributes:
             - chunk_size: int (for file download chunk size)
             - log_file: Path (log file path)
-            - use_csv_mode: bool (always True - only CSV workflow supported)
             - records_dir_resolved: Optional[Path] (resolved records directory)
     """
     # Load environment variables from .env file (if present)
@@ -115,7 +114,6 @@ def parse_arguments():
         # Default to INFO so user sees progress (not silent)
         args.console_log_level = logging.INFO
 
-    # CSV mode is always enabled (only workflow supported)
     # Resolve records directory from CLI or env
     if args.records_dir:
         records_dir_resolved = args.records_dir
@@ -124,7 +122,6 @@ def parse_arguments():
     else:
         records_dir_resolved = None
 
-    args.use_csv_mode = True
     args.records_dir_resolved = records_dir_resolved
 
     return args
