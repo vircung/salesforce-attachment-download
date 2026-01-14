@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Salesforce Attachments Extract - Main Entry Point
+Salesforce Attachments Downloader - Main Entry Point
 
 Runs the CSV-based workflow:
 1. Query attachments using sf CLI with record IDs from CSV files
@@ -31,7 +31,7 @@ def main():
     setup_logging(args.log_file)
 
     logger.info("=" * 70)
-    logger.info("SALESFORCE ATTACHMENTS EXTRACT - CSV WORKFLOW")
+    logger.info("SALESFORCE ATTACHMENTS DOWNLOADER - CSV WORKFLOW")
     logger.info("=" * 70)
 
     try:

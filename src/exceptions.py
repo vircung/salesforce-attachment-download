@@ -1,5 +1,5 @@
 """
-Salesforce Attachments Extract - Exceptions
+Salesforce Attachments Downloader - Exceptions
 
 Centralized exception hierarchy for all Salesforce-related errors.
 """

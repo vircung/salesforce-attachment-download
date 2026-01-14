@@ -15,6 +15,7 @@ build/
 # Output directories
 output/
 logs/
+records/
 
 # IDE
 .vscode/

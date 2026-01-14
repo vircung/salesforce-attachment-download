@@ -1,4 +1,4 @@
-"""Salesforce Attachments Extract Package"""
+"""Salesforce Attachments Downloader Package"""
 
 # Expose key components at package level for convenience
 

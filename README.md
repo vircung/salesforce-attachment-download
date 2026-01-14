@@ -1,4 +1,4 @@
-# Salesforce Attachments Extract
+# Salesforce Attachments Downloader
 
 Tool to download Salesforce Attachment records and files using CSV-based record processing.
 
