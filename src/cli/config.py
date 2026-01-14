@@ -37,6 +37,10 @@ def parse_arguments():
     # CSV Records processing configuration from .env
     env_records_dir = os.getenv('RECORDS_DIR')
     env_batch_size = os.getenv('BATCH_SIZE', '100')
+    
+    # Logging configuration from .env
+    env_verbose = os.getenv('VERBOSE', 'false').lower() in ('true', '1', 'yes')
+    env_debug = os.getenv('DEBUG', 'false').lower() in ('true', '1', 'yes')
 
     # Validate and convert CHUNK_SIZE to int
     try:
@@ -83,12 +87,33 @@ def parse_arguments():
         default=default_batch_size,
         help=f'Number of ParentIds per SOQL query batch (default: {default_batch_size})'
     )
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        default=env_verbose,
+        help='Alias for default behavior (INFO level). Kept for compatibility.'
+    )
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        default=env_debug,
+        help='Enable debug console output (DEBUG level: URLs, query details, etc.)'
+    )
 
     args = parser.parse_args()
 
     # Add additional configuration to args
     args.chunk_size = chunk_size
     args.log_file = Path(env_log_file)
+    
+    # Determine console log level based on flags (priority: debug > verbose > default INFO)
+    if args.debug:
+        args.console_log_level = logging.DEBUG
+    elif args.verbose:
+        args.console_log_level = logging.INFO
+    else:
+        # Default to INFO so user sees progress (not silent)
+        args.console_log_level = logging.INFO
 
     # CSV mode is always enabled (only workflow supported)
     # Resolve records directory from CLI or env

@@ -28,7 +28,7 @@ def read_metadata_csv(csv_path: Path) -> List[Dict[str, str]]:
         FileNotFoundError: If CSV file does not exist
         ValueError: If CSV is missing required columns (Id, Name, ParentId)
     """
-    logger.info(f"Reading metadata from: {csv_path}")
+    logger.debug(f"Reading metadata from: {csv_path}")
 
     if not csv_path.exists():
         raise FileNotFoundError(
@@ -48,5 +48,5 @@ def read_metadata_csv(csv_path: Path) -> List[Dict[str, str]]:
         for row in reader:
             attachments.append(row)
 
-    logger.info(f"Found {len(attachments)} attachments in metadata")
+    logger.debug(f"Found {len(attachments)} attachments in metadata")
     return attachments

@@ -42,7 +42,7 @@ class SalesforceClient:
             'Content-Type': 'application/json'
         })
 
-        logger.info(f"Initialized SF client for: {instance_url}")
+        logger.debug(f"Initialized SF client for: {instance_url}")
 
     def download_attachment(
         self,
@@ -70,7 +70,7 @@ class SalesforceClient:
             endpoint = f"/services/data/v{self.api_version}/sobjects/Attachment/{attachment_id}/Body"
             url = f"{self.instance_url}{endpoint}"
 
-            logger.info(f"Downloading attachment: {attachment_id}")
+            logger.debug(f"Downloading attachment: {attachment_id}")
             logger.debug(f"URL: {url}")
 
             # Make GET request with streaming enabled
@@ -94,7 +94,7 @@ class SalesforceClient:
                         f.write(chunk)
                         bytes_downloaded += len(chunk)
 
-            logger.info(f"Downloaded {bytes_downloaded} bytes to: {output_path.name}")
+            logger.debug(f"Downloaded {bytes_downloaded} bytes to: {output_path.name}")
 
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP error downloading {attachment_id}: {e}")

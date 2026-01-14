@@ -62,13 +62,13 @@ def download_attachments(
 
     try:
         # Step 1: Get SF authentication
-        log_section_header("STEP 1: Retrieving Salesforce authentication")
+        logger.debug("Retrieving Salesforce authentication")
 
         auth_info = get_sf_auth_info(org_alias)
-        logger.info(f"Authenticated as: {auth_info['username']}")
+        logger.debug(f"Authenticated as: {auth_info['username']}")
 
         # Step 2: Initialize SF client
-        log_section_header("STEP 2: Initializing Salesforce API client")
+        logger.debug("Initializing Salesforce API client")
 
         with SalesforceClient(
             access_token=auth_info['access_token'],
@@ -77,14 +77,14 @@ def download_attachments(
         ) as client:
 
             # Step 3: Read metadata
-            log_section_header("STEP 3: Reading attachment metadata")
+            logger.debug("Reading attachment metadata")
 
             attachments = read_metadata_csv(metadata_csv)
             original_count = len(attachments)
 
             # Step 3.5: Apply filtering if configured
             if filter_config and filter_config.has_filters() and filter_config.strategy == 'python':
-                log_section_header("STEP 3.5: Applying ParentId filter")
+                logger.debug("Applying ParentId filter")
 
                 attachments = apply_parent_id_filter(attachments, filter_config)
                 log_filter_summary(original_count, len(attachments), filter_config)
@@ -98,13 +98,13 @@ def download_attachments(
             stats.total = len(attachments)
 
             # Step 3.6: Detect filename collisions
-            log_section_header("STEP 3.6: Analyzing filename collisions")
+            logger.debug("Analyzing filename collisions")
 
             filename_info_map = detect_filename_collisions(attachments)
-            logger.info(f"Collision analysis complete for {len(attachments)} attachments")
+            logger.debug(f"Collision analysis complete for {len(attachments)} attachments")
 
             # Step 4: Download files
-            log_section_header(f"STEP 4: Downloading {stats.total} attachments", width=60)
+            logger.info(f"Downloading {stats.total} attachment(s)...")
 
             output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -154,11 +154,11 @@ def download_attachments(
                     })
                     continue
 
-                logger.info(f"[{idx}/{stats.total}] Processing: {original_name}")
+                logger.info(f"[{idx}/{stats.total}] {original_name}")
 
                 # Check if file already exists
                 if output_path.exists():
-                    logger.info(f"  ⊙ Skipped (already exists): {output_path.name}")
+                    logger.info(f"  ⊙ Skipped (already exists)")
                     stats.skipped += 1
                     continue
 
@@ -166,7 +166,7 @@ def download_attachments(
                     # Download with progress indication using configured chunk size
                     client.download_attachment(attachment_id, output_path, chunk_size=chunk_size)
                     stats.success += 1
-                    logger.info(f"  ✓ Success: {output_path.name}")
+                    logger.info(f"  ✓ Downloaded")
 
                 except SFAPIError as e:
                     stats.failed += 1
@@ -179,12 +179,8 @@ def download_attachments(
                     logger.error(f"  ✗ Error: {error_msg}")
                     continue
 
-        # Step 5: Summary
-        log_section_header("DOWNLOAD SUMMARY", width=60)
-        logger.info(f"Total attachments: {stats.total}")
-        logger.info(f"Downloaded: {stats.success}")
-        logger.info(f"Skipped (already exists): {stats.skipped}")
-        logger.info(f"Failed: {stats.failed}")
+        # Summary (keep as INFO - important for user)
+        logger.info(f"Download complete: {stats.success} downloaded, {stats.skipped} skipped, {stats.failed} failed")
 
         if stats.errors:
             logger.warning("\nFailed downloads:")

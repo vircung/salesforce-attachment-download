@@ -234,7 +234,7 @@ def build_soql_where_clause(filter_config: ParentIdFilter) -> str:
     ids_list = "','".join(escaped_ids)
     where_clause = f"WHERE ParentId IN ('{ids_list}')"
 
-    logger.info(f"Built SOQL WHERE clause with {len(filter_config.exact_ids)} IDs")
+    logger.debug(f"Built SOQL WHERE clause with {len(filter_config.exact_ids)} IDs")
     return where_clause
 
 

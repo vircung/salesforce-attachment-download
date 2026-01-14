@@ -75,7 +75,7 @@ def discover_csv_files(records_dir: Path) -> List[Path]:
             f"No CSV files found in directory: {records_dir.absolute()}"
         )
 
-    logger.info(f"Discovered {len(csv_files)} CSV file(s) in {records_dir}")
+    logger.info(f"Discovered {len(csv_files)} CSV file(s) in {records_dir.name}")
     for csv_file in csv_files:
         logger.debug(f"  - {csv_file.name}")
 
@@ -172,12 +172,12 @@ def extract_ids_from_csv(csv_path: Path) -> List[str]:
                 record_ids.append(record_id)
                 seen_ids.add(record_id)
 
-        logger.info(
+        logger.debug(
             f"Extracted {len(record_ids)} unique ID(s) from '{csv_path.name}'"
         )
 
         if skipped_count > 0:
-            logger.info(
+            logger.debug(
                 f"Skipped {skipped_count} row(s) with empty or duplicate IDs"
             )
 
@@ -256,7 +256,7 @@ def prepare_csv_record_info(
         FileNotFoundError: If CSV file doesn't exist
         ValueError: If CSV structure is invalid or batch_size < 1
     """
-    logger.info(f"Processing CSV file: {csv_path.name}")
+    logger.debug(f"Processing CSV file: {csv_path.name}")
 
     # Extract IDs
     record_ids = extract_ids_from_csv(csv_path)
@@ -275,7 +275,7 @@ def prepare_csv_record_info(
         total_batches=len(id_batches)
     )
 
-    logger.info(
+    logger.debug(
         f"Prepared: {info.total_records} record(s) in {info.total_batches} batch(es)"
     )
 
@@ -302,12 +302,11 @@ def process_records_directory(
         FileNotFoundError: If directory doesn't exist
         ValueError: If no CSV files found or any CSV is invalid
     """
-    logger.info("=" * 60)
-    logger.info("CSV RECORDS PROCESSING")
-    logger.info("=" * 60)
-    logger.info(f"Records directory: {records_dir.absolute()}")
-    logger.info(f"Batch size: {batch_size}")
-    logger.info("")
+    logger.debug("=" * 60)
+    logger.debug("CSV RECORDS PROCESSING")
+    logger.debug("=" * 60)
+    logger.debug(f"Records directory: {records_dir.absolute()}")
+    logger.debug(f"Batch size: {batch_size}")
 
     # Discover CSV files
     csv_files = discover_csv_files(records_dir)
@@ -322,17 +321,10 @@ def process_records_directory(
             logger.error(f"Failed to process '{csv_path.name}': {e}")
             raise
 
-    # Log summary
+    # Log summary (keep INFO for user visibility)
     total_records = sum(info.total_records for info in csv_records)
     total_batches = sum(info.total_batches for info in csv_records)
 
-    logger.info("")
-    logger.info("=" * 60)
-    logger.info("CSV PROCESSING SUMMARY")
-    logger.info("=" * 60)
-    logger.info(f"Total CSV files: {len(csv_records)}")
-    logger.info(f"Total records: {total_records}")
-    logger.info(f"Total batches: {total_batches}")
-    logger.info("")
+    logger.info(f"Found {len(csv_records)} CSV file(s): {total_records} records in {total_batches} batch(es)")
 
     return csv_records

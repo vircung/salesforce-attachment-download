@@ -80,7 +80,7 @@ def execute_soql_query(
         >>> execute_soql_query('my-org', query, output)
         Path('./accounts.csv')
     """
-    logger.info("Executing SOQL query via sf CLI...")
+    logger.debug("Executing SOQL query via sf CLI...")
     logger.debug(f"Query length: {len(query)} chars")
     logger.debug(f"Query preview: {query[:150]}...")
     
@@ -322,8 +322,8 @@ def query_attachments_with_filter(
     output_file = output_dir / f'attachments_{timestamp}.csv'
     
     # Execute query
-    logger.info(f"Querying attachments for org: {org_alias}")
-    logger.info(f"Filter: {where_clause[:100]}...")
+    logger.debug(f"Querying attachments for org: {org_alias}")
+    logger.debug(f"Filter: {where_clause[:100]}...")
     
     csv_path = execute_soql_query(
         org_alias=org_alias,

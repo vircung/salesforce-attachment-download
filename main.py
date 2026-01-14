@@ -27,8 +27,8 @@ def main():
     # Parse arguments and load configuration
     args = parse_arguments()
 
-    # Setup logging
-    setup_logging(args.log_file)
+    # Setup logging with appropriate console level
+    setup_logging(args.log_file, console_level=args.console_log_level)
 
     logger.info("=" * 70)
     logger.info("SALESFORCE ATTACHMENTS DOWNLOADER - CSV WORKFLOW")
@@ -42,7 +42,6 @@ def main():
             return 2
 
         # Execute CSV-based workflow
-        logger.info("")
         stats = process_csv_records_workflow(
             org_alias=args.org,
             output_dir=args.output,
@@ -58,12 +57,36 @@ def main():
         logger.info(f"CSV files processed: {stats['total_csv_files']}")
         logger.info(f"Total records: {stats['total_records']}")
         logger.info(f"Total attachments: {stats['total_attachments']}")
-        logger.info("")
 
         return 0
 
+    except FileNotFoundError as e:
+        logger.error(f"File or directory not found: {e}")
+        logger.error("Please check that all required files and directories exist")
+        logger.debug("Full error details:", exc_info=True)
+        return 2
+    
+    except PermissionError as e:
+        logger.error(f"Permission denied: {e}")
+        logger.error("Please check file and directory permissions")
+        logger.debug("Full error details:", exc_info=True)
+        return 2
+    
+    except ValueError as e:
+        logger.error(f"Invalid configuration or data: {e}")
+        logger.error("Please check your CSV files and configuration settings")
+        logger.debug("Full error details:", exc_info=True)
+        return 2
+    
+    except KeyboardInterrupt:
+        logger.warning("\nWorkflow interrupted by user (Ctrl+C)")
+        logger.info("Exiting gracefully...")
+        return 130  # Standard exit code for SIGINT
+    
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        logger.error(f"Unexpected error occurred: {e}")
+        logger.error("Please check the log file for detailed error information")
+        logger.debug("Full error details:", exc_info=True)
         return 2
 
 

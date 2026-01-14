@@ -35,7 +35,7 @@ def get_sf_auth_info(org_alias: Optional[str] = None) -> Dict[str, str]:
         if org_alias:
             cmd.extend(["--target-org", org_alias])
 
-        logger.info(f"Retrieving auth info for org: {org_alias or 'default'}")
+        logger.debug(f"Retrieving auth info for org: {org_alias or 'default'}")
 
         # Execute command
         result = subprocess.run(
@@ -68,7 +68,7 @@ def get_sf_auth_info(org_alias: Optional[str] = None) -> Dict[str, str]:
         if not auth_info["access_token"] or not auth_info["instance_url"]:
             raise SFAuthError("Missing access token or instance URL in response")
 
-        logger.info(f"Successfully retrieved auth for: {auth_info['username']}")
+        logger.debug(f"Successfully retrieved auth for: {auth_info['username']}")
         logger.debug(f"Instance URL: {auth_info['instance_url']}")
 
         return auth_info

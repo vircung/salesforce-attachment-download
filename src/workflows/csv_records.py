@@ -20,6 +20,7 @@ from src.workflows.common import (
     ensure_directories,
     merge_csv_files
 )
+from src.exceptions import SFQueryError, SFAuthError, SFAPIError
 
 logger = logging.getLogger(__name__)
 
@@ -63,13 +64,11 @@ def process_csv_records_workflow(
         ValueError: If no CSV files found or CSV missing 'Id' column
         RuntimeError: If query or download fails
     """
-    log_section_header("CSV-BASED ATTACHMENT EXTRACTION WORKFLOW")
     logger.info(f"Org: {org_alias}")
     logger.info(f"Records directory: {records_dir.absolute()}")
     logger.info(f"Output directory: {output_dir.absolute()}")
     logger.info(f"Batch size: {batch_size}")
     logger.info(f"Download enabled: {download}")
-    logger.info("")
 
     # Process CSV files - validates, extracts IDs, creates batches
     csv_records = process_records_directory(records_dir, batch_size)
@@ -90,7 +89,7 @@ def process_csv_records_workflow(
         log_section_header(f"PROCESSING CSV {csv_idx}/{len(csv_records)}: {csv_info.csv_name}.csv")
         logger.info(f"Records: {csv_info.total_records}")
         logger.info(f"Batches: {csv_info.total_batches}")
-        logger.info("")
+        
 
         try:
             # Create output subdirectories for this CSV
@@ -103,7 +102,7 @@ def process_csv_records_workflow(
             logger.info(f"Output directories:")
             logger.info(f"  Metadata: {csv_metadata_dir}")
             logger.info(f"  Files: {csv_files_dir}")
-            logger.info("")
+            
 
             # Query attachments for each batch
             batch_csv_paths = []
@@ -135,20 +134,20 @@ def process_csv_records_workflow(
                     total_attachments += batch_count
                     logger.info(f"Batch {batch_idx + 1}/{csv_info.total_batches}: Found {batch_count} attachment(s)")
 
-                logger.info("")
+                
 
             # Merge all batch results into single CSV
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             merged_csv_path = csv_metadata_dir / f"attachments_{timestamp}_merged.csv"
 
             merged_count = merge_csv_files(batch_csv_paths, merged_csv_path)
-            logger.info("")
+            
 
             # Download attachments if enabled
             downloaded_count = 0
             if download and merged_count > 0:
                 logger.info(f"Downloading {merged_count} attachment(s) to: {csv_files_dir}")
-                logger.info("")
+                
 
                 try:
                     download_stats = download_attachments(
@@ -184,12 +183,51 @@ def process_csv_records_workflow(
             stats['total_attachments'] += merged_count
 
             logger.info(f"✓ Completed {csv_info.csv_name}.csv")
-            logger.info("")
+            
 
-        except Exception as e:
-            logger.error(f"✗ Failed to process {csv_info.csv_name}.csv: {e}")
+        except SFAuthError as e:
+            logger.error(f"✗ Salesforce authentication failed for {csv_info.csv_name}.csv: {e}")
+            logger.error("Please check your Salesforce CLI authentication (run: sf org list)")
+            logger.debug("Full error details:", exc_info=True)
             failed_files.append(csv_info.csv_name)
-            logger.info("")
+            
+        except SFQueryError as e:
+            logger.error(f"✗ Query failed for {csv_info.csv_name}.csv: {e}")
+            logger.error("Check query syntax and record IDs")
+            logger.debug("Full error details:", exc_info=True)
+            failed_files.append(csv_info.csv_name)
+            
+        except SFAPIError as e:
+            logger.error(f"✗ Salesforce API error for {csv_info.csv_name}.csv: {e}")
+            logger.error("Check network connection and API access")
+            logger.debug("Full error details:", exc_info=True)
+            failed_files.append(csv_info.csv_name)
+            
+        except FileNotFoundError as e:
+            logger.error(f"✗ File not found while processing {csv_info.csv_name}.csv: {e}")
+            logger.debug("Full error details:", exc_info=True)
+            failed_files.append(csv_info.csv_name)
+            
+        except PermissionError as e:
+            logger.error(f"✗ Permission denied while processing {csv_info.csv_name}.csv: {e}")
+            logger.debug("Full error details:", exc_info=True)
+            failed_files.append(csv_info.csv_name)
+            
+        except ValueError as e:
+            logger.error(f"✗ Invalid data in {csv_info.csv_name}.csv: {e}")
+            logger.debug("Full error details:", exc_info=True)
+            failed_files.append(csv_info.csv_name)
+            
+        except KeyboardInterrupt:
+            logger.warning(f"\n✗ Processing interrupted by user during {csv_info.csv_name}.csv")
+            raise  # Re-raise to be caught by main
+            
+        except Exception as e:
+            logger.error(f"✗ Unexpected error processing {csv_info.csv_name}.csv: {e}")
+            logger.error("See log file for detailed error information")
+            logger.debug("Full error details:", exc_info=True)
+            failed_files.append(csv_info.csv_name)
+            
             # Continue processing other CSV files
 
     # Final summary
@@ -204,6 +242,6 @@ def process_csv_records_workflow(
     else:
         logger.info("All CSV files processed successfully!")
 
-    logger.info("")
+    
 
     return stats

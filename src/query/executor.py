@@ -38,7 +38,7 @@ def run_query_script_with_filter(
         SFAuthError: If authentication fails
         FileNotFoundError: If sf CLI is not installed
     """
-    logger.info("Executing attachment query with filter...")
+    logger.debug("Executing attachment query with filter...")
     logger.debug(f"WHERE clause preview: {where_clause[:100]}...")
 
     # Execute query using native Python implementation
