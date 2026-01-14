@@ -389,12 +389,14 @@ attachments-extract/
 ├── main.py                      # Main entry point
 ├── requirements.txt             # Python dependencies
 ├── .gitignore                   # Git ignore file
+├── .env.example                 # Environment configuration template
 ├── README.md                    # This file
-├── CLAUDE.md                    # Project specifications
 ├── src/
 │   ├── __init__.py
 │   ├── exceptions.py           # Custom exceptions
+│   ├── utils.py                # Logging utilities
 │   ├── workflows/
+│   │   ├── common.py           # Shared workflow utilities
 │   │   └── csv_records.py      # CSV workflow orchestration
 │   ├── csv/
 │   │   ├── processor.py        # CSV file processing
@@ -404,13 +406,15 @@ attachments-extract/
 │   │   ├── soql.py             # Native SOQL execution via sf CLI
 │   │   └── filters.py          # WHERE clause building
 │   ├── download/
-│   │   └── downloader.py       # Download orchestration
+│   │   ├── downloader.py       # Download orchestration
+│   │   ├── metadata.py         # Metadata CSV reading
+│   │   ├── filename.py         # Filename collision detection
+│   │   └── stats.py            # Download statistics
 │   ├── api/
 │   │   ├── sf_auth.py          # SF CLI authentication
 │   │   └── sf_client.py        # REST API client
-│   ├── cli/
-│   │   └── config.py           # CLI argument parsing
-│   └── utils.py                # Logging utilities
+│   └── cli/
+│       └── config.py           # CLI argument parsing
 ├── records/                     # CSV files with record IDs (user-provided)
 ├── output/
 │   ├── metadata/               # CSV files with attachment metadata
