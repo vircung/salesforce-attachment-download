@@ -7,15 +7,11 @@ using authentication credentials from sf CLI.
 
 import logging
 import requests
-from typing import Optional
 from pathlib import Path
 
+from src.exceptions import SFAPIError
+
 logger = logging.getLogger(__name__)
-
-
-class SFAPIError(Exception):
-    """Custom exception for Salesforce API errors"""
-    pass
 
 
 class SalesforceClient:

@@ -1,195 +1,31 @@
 """
 Attachment Downloader
 
-Main orchestration script to download Salesforce attachments
+Main orchestration module to download Salesforce attachments
 based on CSV metadata file.
 """
 
-import csv
 import logging
 import sys
-from collections import defaultdict
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
-from src.api.sf_auth import get_sf_auth_info, SFAuthError
-from src.api.sf_client import SalesforceClient, SFAPIError
+from src.api.sf_auth import get_sf_auth_info
+from src.api.sf_client import SalesforceClient
+from src.exceptions import SFAuthError, SFAPIError
 from src.query.filters import ParentIdFilter, apply_parent_id_filter, log_filter_summary
-from src.utils import log_section_header
+from src.utils import log_section_header, setup_logging
 
-
-def setup_logging(log_file: Path) -> None:
-    """
-    Configure logging to file and console.
-
-    Args:
-        log_file: Path to the log file where logs will be written
-    """
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
-
+from .stats import DownloadStats
+from .metadata import read_metadata_csv
+from .filename import (
+    FilenameInfo,
+    DEFAULT_PARENT_ID,
+    sanitize_filename,
+    detect_filename_collisions,
+)
 
 logger = logging.getLogger(__name__)
-
-# Maximum filename length supported by most filesystems
-MAX_FILENAME_LENGTH = 255
-
-# Default value for attachments without ParentId
-DEFAULT_PARENT_ID = 'NO_PARENT'
-
-
-@dataclass
-class DownloadStats:
-    """Statistics for attachment download operations."""
-    total: int = 0
-    success: int = 0
-    failed: int = 0
-    skipped: int = 0
-    errors: List[Dict[str, str]] = field(default_factory=list)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for backward compatibility."""
-        return {
-            'total': self.total,
-            'success': self.success,
-            'failed': self.failed,
-            'skipped': self.skipped,
-            'errors': self.errors
-        }
-
-
-def sanitize_filename(filename: str) -> str:
-    """
-    Sanitize filename to be filesystem-safe.
-
-    Removes or replaces characters that may cause issues on
-    Windows, Linux, or macOS filesystems. Also truncates filenames
-    that exceed the maximum length.
-
-    Args:
-        filename: Original filename to sanitize
-
-    Returns:
-        Sanitized filename safe for filesystem use
-    """
-    # Replace problematic characters
-    invalid_chars = '<>:"/\\|?*'
-    for char in invalid_chars:
-        filename = filename.replace(char, '_')
-
-    # Limit length to maximum supported by most filesystems
-    if len(filename) > MAX_FILENAME_LENGTH:
-        name, ext = filename.rsplit('.', 1) if '.' in filename else (filename, '')
-        max_name_length = MAX_FILENAME_LENGTH - len(ext) - 1
-        filename = name[:max_name_length] + '.' + ext if ext else name[:MAX_FILENAME_LENGTH]
-
-    return filename
-
-
-def read_metadata_csv(csv_path: Path) -> List[Dict[str, str]]:
-    """
-    Read attachment metadata from CSV file.
-
-    Expected columns: Id, Name, ContentType, BodyLength, ParentId, etc.
-
-    Args:
-        csv_path: Path to CSV file containing attachment metadata
-
-    Returns:
-        List of dictionaries with attachment metadata
-
-    Raises:
-        FileNotFoundError: If CSV file does not exist
-        ValueError: If CSV is missing required columns (Id, Name, ParentId)
-    """
-    logger.info(f"Reading metadata from: {csv_path}")
-
-    if not csv_path.exists():
-        raise FileNotFoundError(
-            f"Metadata CSV file not found at path: {csv_path.absolute()}. "
-            f"Please ensure the file exists and the path is correct."
-        )
-
-    attachments = []
-    with csv_path.open('r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-
-        # Validate required columns
-        required_cols = ['Id', 'Name', 'ParentId']
-        if not all(col in reader.fieldnames for col in required_cols):
-            raise ValueError(f"CSV missing required columns: {required_cols}")
-
-        for row in reader:
-            attachments.append(row)
-
-    logger.info(f"Found {len(attachments)} attachments in metadata")
-    return attachments
-
-
-@dataclass
-class FilenameInfo:
-    """Pre-computed filename information for an attachment."""
-    safe_name: str
-    has_collision: bool
-
-
-def detect_filename_collisions(
-    attachments: List[Dict[str, str]]
-) -> Dict[str, FilenameInfo]:
-    """
-    Detect filename collisions and pre-compute sanitized filenames.
-    Uses lowercase comparison for collision detection to be filesystem-agnostic.
-
-    Args:
-        attachments: List of attachment dictionaries with Id, ParentId, Name
-
-    Returns:
-        Dict mapping attachment Id to FilenameInfo with safe_name and collision flag
-    """
-    # First pass: count occurrences per (parent_id, safe_name_lowercase)
-    occurrence_count: Dict[Tuple[str, str], int] = defaultdict(int)
-    attachment_info: Dict[str, Tuple[str, str, str]] = {}  # id -> (parent_id, safe_name, key)
-
-    for attachment in attachments:
-        attachment_id = attachment['Id']
-        parent_id = attachment.get('ParentId', DEFAULT_PARENT_ID)
-        original_name = attachment.get('Name', 'unnamed')
-        safe_name = sanitize_filename(original_name)
-
-        # Use lowercase for collision detection (filesystem-agnostic)
-        collision_key = (parent_id, safe_name.lower())
-        occurrence_count[collision_key] += 1
-        attachment_info[attachment_id] = (parent_id, safe_name, collision_key)
-
-    # Second pass: build result with collision flags
-    result: Dict[str, FilenameInfo] = {}
-    for attachment_id, (parent_id, safe_name, collision_key) in attachment_info.items():
-        has_collision = occurrence_count[collision_key] > 1
-        result[attachment_id] = FilenameInfo(
-            safe_name=safe_name,
-            has_collision=has_collision
-        )
-
-    # Log collision statistics
-    total_collisions = sum(1 for info in result.values() if info.has_collision)
-    if total_collisions > 0:
-        logger.warning(
-            f"Detected {total_collisions} file(s) with name collisions - "
-            f"will use Id prefix for these files"
-        )
-    else:
-        logger.info("No filename collisions detected")
-
-    return result
 
 
 def download_attachments(

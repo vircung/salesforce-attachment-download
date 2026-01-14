@@ -10,12 +10,9 @@ import subprocess
 import logging
 from typing import Dict, Optional
 
+from src.exceptions import SFAuthError
+
 logger = logging.getLogger(__name__)
-
-
-class SFAuthError(Exception):
-    """Custom exception for Salesforce authentication errors"""
-    pass
 
 
 def get_sf_auth_info(org_alias: Optional[str] = None) -> Dict[str, str]:

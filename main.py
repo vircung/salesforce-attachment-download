@@ -13,7 +13,7 @@ import logging
 from src.cli.config import parse_arguments
 from src.workflows.csv_records import process_csv_records_workflow
 from src.workflows.standard import process_standard_workflow
-from src.download.downloader import setup_logging
+from src.utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
