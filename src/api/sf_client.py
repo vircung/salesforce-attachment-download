@@ -49,7 +49,7 @@ class SalesforceClient:
         attachment_id: str,
         output_path: Path,
         chunk_size: int = 8192
-    ) -> None:
+    ) -> int:
         """
         Download an attachment file from Salesforce.
 
@@ -60,6 +60,9 @@ class SalesforceClient:
             attachment_id: Salesforce Attachment ID
             output_path: Local file path to save downloaded content
             chunk_size: Size of chunks for streaming download (default: 8KB)
+
+        Returns:
+            Number of bytes downloaded
 
         Raises:
             SFAPIError: If API request fails
@@ -95,6 +98,8 @@ class SalesforceClient:
                         bytes_downloaded += len(chunk)
 
             logger.debug(f"Downloaded {bytes_downloaded} bytes to: {output_path.name}")
+            
+            return bytes_downloaded
 
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP error downloading {attachment_id}: {e}")

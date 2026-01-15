@@ -3,6 +3,8 @@ Common Utilities
 
 Basic utility functions used across the application with no external dependencies.
 This module is intentionally kept minimal to avoid circular imports.
+
+Note: setup_logging has been moved to src.logging.manager for progress-aware functionality.
 """
 
 import logging
@@ -16,6 +18,9 @@ def setup_logging(log_file: Path, console_level: int = logging.WARNING) -> None:
     """
     Configure logging to file and console with different log levels.
     
+    DEPRECATED: This function is maintained for backward compatibility.
+    Use src.logging.LoggingManager for new code with progress-aware functionality.
+    
     File handler always logs at DEBUG level (full details for analysis).
     Console handler uses the specified level (WARNING/INFO/DEBUG based on flags).
 
@@ -26,40 +31,15 @@ def setup_logging(log_file: Path, console_level: int = logging.WARNING) -> None:
                       - INFO: Progress updates and main workflow steps (--verbose)
                       - DEBUG: All technical details (--debug)
     """
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-
-    # Create formatters
-    # Detailed format for file (includes module name)
-    file_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    # Import here to avoid circular imports
+    from .logging import LoggingManager
     
-    # Simpler format for console (more readable)
-    console_formatter = logging.Formatter(
-        '%(levelname)s - %(message)s' if console_level >= logging.INFO 
-        else '%(message)s'
-    )
-
-    # Create file handler (always DEBUG level for full logs)
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(file_formatter)
-
-    # Create console handler (configurable level)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(console_level)
-    console_handler.setFormatter(console_formatter)
-
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)  # Capture all levels
+    # Use the new logging manager for backward compatibility
+    manager = LoggingManager.get_instance()
+    manager.setup(log_file, console_level)
     
-    # Remove existing handlers to avoid duplicates
-    root_logger.handlers.clear()
-    
-    # Add both handlers
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
+    # Log deprecation warning
+    logger.info("Using backward compatibility setup_logging - consider migrating to LoggingManager")
 
 
 def log_section_header(title: str, width: int = 70) -> None:

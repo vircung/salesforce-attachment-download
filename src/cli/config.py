@@ -41,6 +41,12 @@ def parse_arguments():
     env_verbose = os.getenv('VERBOSE', 'false').lower() in ('true', '1', 'yes')
     env_debug = os.getenv('DEBUG', 'false').lower() in ('true', '1', 'yes')
 
+    # Progress display configuration from .env
+    env_progress = os.getenv('PROGRESS', 'auto').lower()
+    if env_progress not in ('auto', 'on', 'off'):
+        logger.warning(f"Invalid PROGRESS value '{env_progress}', using default 'auto'")
+        env_progress = 'auto'
+
     # Validate and convert CHUNK_SIZE to int
     try:
         chunk_size = int(env_chunk_size)
@@ -97,6 +103,12 @@ def parse_arguments():
         action='store_true',
         default=env_debug,
         help='Enable debug console output (DEBUG level: URLs, query details, etc.)'
+    )
+    parser.add_argument(
+        '--progress',
+        choices=['auto', 'on', 'off'],
+        default=env_progress,
+        help=f'Progress display mode: auto (detect best), on (force display), off (disable). (default: {env_progress})'
     )
 
     args = parser.parse_args()

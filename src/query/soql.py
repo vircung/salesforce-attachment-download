@@ -9,7 +9,7 @@ import subprocess
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Literal
+from typing import Literal, NoReturn
 
 from src.exceptions import SFQueryError, SFAuthError
 
@@ -192,7 +192,7 @@ def _count_records(output_file: Path, result_format: str) -> int:
         return -1  # Unknown
 
 
-def _handle_query_error(result: subprocess.CompletedProcess, query: str, org_alias: str) -> None:
+def _handle_query_error(result: subprocess.CompletedProcess, query: str, org_alias: str) -> NoReturn:
     """
     Analyze error output and raise appropriate exception with helpful message.
     

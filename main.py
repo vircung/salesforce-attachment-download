@@ -12,7 +12,9 @@ import logging
 
 from src.cli.config import parse_arguments
 from src.workflows.csv_records import process_csv_records_workflow
-from src.utils import setup_logging
+from src.logging import LoggingManager
+from src.progress import ProgressTracker
+from src.progress.core import ProgressMode
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +29,9 @@ def main():
     # Parse arguments and load configuration
     args = parse_arguments()
 
-    # Setup logging with appropriate console level
-    setup_logging(args.log_file, console_level=args.console_log_level)
-
-    logger.info("=" * 70)
-    logger.info("SALESFORCE ATTACHMENTS DOWNLOADER - CSV WORKFLOW")
-    logger.info("=" * 70)
+    # Setup logging with progress-aware management
+    logging_manager = LoggingManager.get_instance()
+    logging_manager.setup(args.log_file, console_level=args.console_log_level)
 
     try:
         # Validate required records directory
@@ -41,22 +40,50 @@ def main():
             logger.error("Usage: python main.py --org <org> --records-dir <path>")
             return 2
 
-        # Execute CSV-based workflow
-        stats = process_csv_records_workflow(
-            org_alias=args.org,
-            output_dir=args.output,
-            records_dir=args.records_dir_resolved,
-            batch_size=args.batch_size,
-            download=True
-        )
+        # Initialize progress tracker based on CLI argument
+        progress_mode = ProgressMode(args.progress)
+        progress_tracker = ProgressTracker(mode=progress_mode)
+        
+        # Connect logging and progress systems before starting
+        progress_tracker.set_logging_manager(logging_manager)
+        
+        # Execute entire workflow with progress tracking context
+        with progress_tracker:
+            # Initial header (suppressed in progress mode)
+            logger.info("=" * 70)
+            logger.info("SALESFORCE ATTACHMENTS DOWNLOADER - CSV WORKFLOW")
+            logger.info("=" * 70)
+            
+            # Execute CSV-based workflow
+            stats = process_csv_records_workflow(
+                org_alias=args.org,
+                output_dir=args.output,
+                records_dir=args.records_dir_resolved,
+                batch_size=args.batch_size,
+                download=True,
+                progress_tracker=progress_tracker
+            )
 
-        # Final summary
-        logger.info("=" * 70)
-        logger.info("WORKFLOW COMPLETE")
-        logger.info("=" * 70)
-        logger.info(f"CSV files processed: {stats['total_csv_files']}")
-        logger.info(f"Total records: {stats['total_records']}")
-        logger.info(f"Total attachments: {stats['total_attachments']}")
+            # Final summary - use Rich display in progress mode, regular logging otherwise
+            if progress_tracker.mode == ProgressMode.OFF:
+                # Traditional logging when progress is disabled
+                logger.info("=" * 70)
+                logger.info("WORKFLOW COMPLETE")
+                logger.info("=" * 70)
+                logger.info(f"CSV files processed: {stats['total_csv_files']}")
+                logger.info(f"Total records: {stats['total_records']}")
+                logger.info(f"Total attachments: {stats['total_attachments']}")
+            else:
+                # Rich success panel when progress mode is active
+                progress_tracker.display_completion_summary(stats)
+                
+                # Still log to file but suppress console output
+                logger.info("=" * 70)
+                logger.info("WORKFLOW COMPLETE")
+                logger.info("=" * 70)
+                logger.info(f"CSV files processed: {stats['total_csv_files']}")
+                logger.info(f"Total records: {stats['total_records']}")
+                logger.info(f"Total attachments: {stats['total_attachments']}")
 
         return 0
 
