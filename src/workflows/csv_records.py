@@ -7,6 +7,7 @@ and downloading their associated attachments.
 
 import csv
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -15,6 +16,7 @@ from src.query.executor import run_query_script_with_filter
 from src.query.filters import ParentIdFilter, build_soql_where_clause
 from src.csv.processor import process_records_directory
 from src.download.downloader import download_attachments
+from src.api.sf_client import DEFAULT_TMP_DIR_NAME
 from src.utils import log_section_header
 from src.workflows.common import (
     ensure_directories,
@@ -24,7 +26,6 @@ from src.exceptions import SFQueryError, SFAuthError, SFAPIError
 from src.progress.core import ProgressTracker
 from src.progress.core.stage import StageStatus
 from src.progress.stages import CsvProcessingStage, SoqlQueryStage, DownloadStage
-from src.download.downloader import download_attachments
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,8 @@ def process_csv_records_workflow(
     records_dir: Path,
     batch_size: int = 100,
     download: bool = True,
-    progress_tracker: Optional[ProgressTracker] = None
+    progress_tracker: Optional[ProgressTracker] = None,
+    download_workers: int = 1
 ) -> Dict[str, Any]:
     """
     Process CSV files containing record IDs and download their attachments.
@@ -54,6 +56,7 @@ def process_csv_records_workflow(
         batch_size: Number of ParentIds per SOQL query (default: 100)
         download: Whether to download files after querying (default: True)
         progress_tracker: Optional progress tracker for UI updates
+        download_workers: Parallel downloads per bucket (default: 1)
 
     Returns:
         Dictionary with processing statistics:
@@ -69,12 +72,15 @@ def process_csv_records_workflow(
         FileNotFoundError: If records_dir doesn't exist
         ValueError: If no CSV files found or CSV missing 'Id' column
         RuntimeError: If query or download fails
+        SFAuthError: If authentication fails (fatal)
+        SFAPIError: If network/service errors occur (fatal)
     """
     logger.info(f"Org: {org_alias}")
     logger.info(f"Records directory: {records_dir.absolute()}")
     logger.info(f"Output directory: {output_dir.absolute()}")
     logger.info(f"Batch size: {batch_size}")
     logger.info(f"Download enabled: {download}")
+    logger.info(f"Download workers: {download_workers}")
 
     # Initialize progress stages
     csv_stage = CsvProcessingStage()
@@ -120,6 +126,7 @@ def process_csv_records_workflow(
     }
 
     failed_files = []
+    failed_downloads = []
     
     # Track cumulative batches across all CSV files for SOQL progress
     cumulative_batches_completed = 0
@@ -231,28 +238,67 @@ def process_csv_records_workflow(
             downloaded_count = 0
             if download and merged_count > 0:
                 logger.info(f"Downloading {merged_count} attachment(s) to: {csv_files_dir}")
-                
+
+                global_tmp_download_dir = output_dir / DEFAULT_TMP_DIR_NAME
                 try:
+                    global_tmp_download_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Clean global temp dir before each CSV download phase.
+                    if any(global_tmp_download_dir.iterdir()):
+                        shutil.rmtree(global_tmp_download_dir)
+                        global_tmp_download_dir.mkdir(parents=True, exist_ok=True)
+
                     download_stats = download_attachments(
                         metadata_csv=merged_csv_path,
                         output_dir=csv_files_dir,
                         org_alias=org_alias,
                         filter_config=None,  # No additional filtering needed
-                        progress_stage=download_stage
+                        progress_stage=download_stage,
+                        download_workers=download_workers,
+                        batch_size=batch_size
                     )
 
                     downloaded_count = download_stats['success']
                     skipped_count = download_stats.get('skipped', 0)
+                    failed_count = download_stats.get('failed', 0)
+                    errors = download_stats.get('errors', [])
 
-                    logger.info(f"Downloaded: {downloaded_count}, Skipped: {skipped_count}, Total: {merged_count} file(s)")
-                    
+                    logger.info(
+                        f"Downloaded: {downloaded_count}, Skipped: {skipped_count}, Failed: {failed_count}, "
+                        f"Total: {merged_count} file(s)"
+                    )
+
                     # Complete download stage
-                    download_stage.complete(f"Downloaded {downloaded_count} files")
-                    
+                    download_stage.complete_downloads(
+                        total_downloaded=downloaded_count,
+                        total_failed=failed_count,
+                        total_skipped=skipped_count
+                    )
+
+                    if errors:
+                        failed_downloads.extend(errors)
+
+                except SFAuthError as e:
+                    logger.error(f"Download failed for {csv_info.csv_name}: {e}")
+                    download_stage.fail(str(e), f"Download failed for {csv_info.csv_name}")
+                    raise
+
+                except SFAPIError as e:
+                    logger.error(f"Download failed for {csv_info.csv_name}: {e}")
+                    download_stage.fail(str(e), f"Download failed for {csv_info.csv_name}")
+                    raise
+
                 except Exception as e:
                     logger.error(f"Download failed for {csv_info.csv_name}: {e}")
                     download_stage.fail(str(e), f"Download failed for {csv_info.csv_name}")
                     # Continue processing other CSVs even if download fails
+
+                finally:
+                    try:
+                        if global_tmp_download_dir.exists():
+                            shutil.rmtree(global_tmp_download_dir)
+                    except Exception:
+                        pass
             elif download and merged_count == 0:
                 logger.info("No attachments to download")
                 download_stage.skip("No attachments to download")
@@ -299,6 +345,8 @@ def process_csv_records_workflow(
             soql_stage.fail(str(e))
             download_stage.fail(str(e))
             
+            # Stop workflow on auth errors
+            raise
         except SFQueryError as e:
             logger.error(f"✗ Query failed for {csv_info.csv_name}.csv: {e}")
             logger.error("Check query syntax and record IDs")
@@ -313,9 +361,11 @@ def process_csv_records_workflow(
             logger.debug("Full error details:", exc_info=True)
             failed_files.append(csv_info.csv_name)
             csv_stage.fail(str(e))
-            soql_stage.fail(str(e))
             download_stage.fail(str(e))
             
+            # Stop workflow on fatal API/network errors
+            raise
+
         except FileNotFoundError as e:
             logger.error(f"✗ File not found while processing {csv_info.csv_name}.csv: {e}")
             logger.debug("Full error details:", exc_info=True)
@@ -359,6 +409,11 @@ def process_csv_records_workflow(
     logger.info(f"Total records: {stats['total_records']}")
     logger.info(f"Total batches executed: {stats['total_batches']}")
     logger.info(f"Total attachments found: {stats['total_attachments']}")
+
+    if failed_downloads:
+        logger.warning("\nFailed downloads:")
+        for error in failed_downloads:
+            logger.warning(f"  - {error['name']} (ID: {error['id']}): {error['error']}")
 
     # Complete stages BEFORE returning (before progress tracker context exits)
     # Always complete stages appropriately regardless of partial failures

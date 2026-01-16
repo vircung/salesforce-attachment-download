@@ -61,8 +61,10 @@ def main():
                 records_dir=args.records_dir_resolved,
                 batch_size=args.batch_size,
                 download=True,
-                progress_tracker=progress_tracker
+                progress_tracker=progress_tracker,
+                download_workers=args.download_workers
             )
+
 
             # Final summary - use Rich display in progress mode, regular logging otherwise
             if progress_tracker.mode == ProgressMode.OFF:

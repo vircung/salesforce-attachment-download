@@ -28,7 +28,16 @@ class SFAPIError(SalesforceError):
     - REST API request fails
     - Resource not found (404)
     - Permission denied
-    - Network errors
+    """
+    pass
+
+
+class SFNetworkError(SFAPIError):
+    """Exception for Salesforce network or service errors.
+
+    Raised when:
+    - Network connection fails
+    - API service returns non-auth fatal errors (5xx/4xx non-404)
     """
     pass
 

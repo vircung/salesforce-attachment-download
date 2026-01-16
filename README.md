@@ -64,7 +64,8 @@ python main.py --org your-org --records-dir ./records --output ./output
 
 **Optional arguments:**
 - `--output`: Base output directory (default: `./output`)
-- `--batch-size`: Number of ParentIds per SOQL query batch (default: 100)
+- `--batch-size`: Number of ParentIds per SOQL query batch (default: 100). Download buckets are derived from this value (not separately configurable).
+- `--download-workers`: Parallel file downloads within each bucket (default: 1)
 - `--progress`: Progress display mode (`auto`, `on`, `off`)
 - `--verbose`: Alias for default INFO logging
 - `--debug`: Enable DEBUG console logging
@@ -162,8 +163,6 @@ The tool supports loading configuration from a `.env` file in the project root d
    # Log file path
    LOG_FILE=./logs/download.log
 
-   # Download chunk size (bytes)
-   CHUNK_SIZE=8192
 
    # Batch size for SOQL queries
    BATCH_SIZE=100
@@ -186,8 +185,8 @@ The tool supports loading configuration from a `.env` file in the project root d
 | `OUTPUT_DIR` | Base output directory | `./output` | `--output` |
 | `RECORDS_DIR` | Directory containing CSV files | None (required) | `--records-dir` |
 | `LOG_FILE` | Log file path | `./logs/download.log` | N/A |
-| `CHUNK_SIZE` | Download chunk size in bytes | `8192` | N/A |
 | `BATCH_SIZE` | Number of ParentIds per query batch | `100` | `--batch-size` |
+| `DOWNLOAD_WORKERS` | Parallel downloads per bucket | `1` | `--download-workers` |
 | `VERBOSE` | Enable verbose console output (INFO level) | `false` | `--verbose` |
 | `DEBUG` | Enable debug console output (DEBUG level) | `false` | `--debug` |
 | `PROGRESS` | Progress display mode: `auto`, `on`, `off` | `auto` | `--progress` |
@@ -214,7 +213,26 @@ python main.py --org your-org --records-dir ./records --batch-size 150
 
 **Default:** 100 record IDs per batch
 
+### Download Concurrency Configuration
+
+Control bucketed parallel file downloads and the bucket prefetch depth:
+
+- `--download-workers` / `DOWNLOAD_WORKERS`: parallel file downloads **within a bucket**
+
+**Via .env file:**
+```bash
+DOWNLOAD_WORKERS=1
+```
+
+**Via CLI:**
+```bash
+python main.py --org your-org --records-dir ./records --download-workers 4
+```
+
+**Default:** 1 download worker (sequential)
+
 **Notes:**
+- Concurrency is isolated within each bucket (buckets are processed in order)
 - Larger batches = fewer queries but longer query execution time
 - Smaller batches = more queries but faster individual queries
 - Salesforce has SOQL query length limits (~20,000 characters)
@@ -316,7 +334,7 @@ INFO - WORKFLOW COMPLETE
 
 The tool gracefully handles errors and provides clear error messages:
 - Missing attachments (404 errors)
-- Network failures
+- Network failures (will stop the workflow)
 - Invalid filenames
 - Disk write errors
 - Authentication expiry
@@ -325,7 +343,15 @@ The tool gracefully handles errors and provides clear error messages:
 - Invalid SOQL syntax
 - Insufficient permissions
 
-Failed downloads are logged but don't stop the process.
+Per-file download failures are best-effort and summarized at the end of the workflow.
+Fatal authentication errors or network/service failures will stop the workflow.
+
+### Partial Downloads
+
+To avoid treating partial files as complete, downloads are written to a temporary folder first and only moved into the final destination on success.
+
+- Temp folder: `output/.tmp_downloads/` (global per `--output` directory / org alias)
+- Lifecycle: the application cleans it before each CSV download phase and removes it after the phase completes
 
 ## Command-Line Options
 
@@ -334,6 +360,7 @@ Failed downloads are logged but don't stop the process.
 --records-dir       Directory containing CSV files with record IDs (REQUIRED)
 --output            Base output directory (default: ./output)
 --batch-size        Number of ParentIds per SOQL query batch (default: 100)
+--download-workers  Parallel file downloads within each bucket (default: 1)
 --progress          Progress display mode: auto, on, off
 --verbose           Enable verbose console output (INFO level)
 --debug             Enable debug console output (DEBUG level with technical details)
@@ -341,7 +368,7 @@ Failed downloads are logged but don't stop the process.
 
 ## Current Limitations
 
-- Sequential processing (no parallel downloads)
+- Concurrency is isolated within each bucket; CSV processing remains sequential
 - No resume capability for interrupted sessions
 - Basic error handling without exponential backoff
 - Support limited to Attachment object (ContentDocument not yet supported)
@@ -408,6 +435,7 @@ python main.py --org my-org --records-dir ./records --batch-size 200
 SF_ORG_ALIAS=my-org
 RECORDS_DIR=./records
 BATCH_SIZE=150
+DOWNLOAD_WORKERS=2
 
 # Then run without arguments
 python main.py
@@ -459,7 +487,7 @@ attachments-extract/
 Potential improvements for future releases:
 
 - **ContentDocument/ContentVersion support** - Handle newer Salesforce file storage
-- **Parallel downloads** - Concurrent file downloads for improved performance
+- **Improve download scheduling** - Tune bucket sizing, prefetch depth, and fairness
 - **Resume capability** - Continue interrupted downloads from where they stopped
 - **Progress bars** - Visual feedback with progress indicators (e.g., tqdm)
 - **Retry with exponential backoff** - Automatic retry mechanism for transient failures

@@ -20,7 +20,6 @@ def parse_arguments():
 
     Returns:
         argparse.Namespace: Parsed arguments with additional attributes:
-            - chunk_size: int (for file download chunk size)
             - log_file: Path (log file path)
             - records_dir_resolved: Optional[Path] (resolved records directory)
     """
@@ -31,11 +30,11 @@ def parse_arguments():
     env_org_alias = os.getenv('SF_ORG_ALIAS')
     env_output_dir = os.getenv('OUTPUT_DIR', './output')
     env_log_file = os.getenv('LOG_FILE', './logs/download.log')
-    env_chunk_size = os.getenv('CHUNK_SIZE', '8192')
 
     # CSV Records processing configuration from .env
     env_records_dir = os.getenv('RECORDS_DIR')
     env_batch_size = os.getenv('BATCH_SIZE', '100')
+    env_download_workers = os.getenv('DOWNLOAD_WORKERS', '1')
     
     # Logging configuration from .env
     env_verbose = os.getenv('VERBOSE', 'false').lower() in ('true', '1', 'yes')
@@ -47,12 +46,6 @@ def parse_arguments():
         logger.warning(f"Invalid PROGRESS value '{env_progress}', using default 'auto'")
         env_progress = 'auto'
 
-    # Validate and convert CHUNK_SIZE to int
-    try:
-        chunk_size = int(env_chunk_size)
-    except ValueError:
-        logger.warning(f"Invalid CHUNK_SIZE value '{env_chunk_size}', using default 8192")
-        chunk_size = 8192
 
     # Validate and convert BATCH_SIZE to int
     default_batch_size = 100
@@ -64,6 +57,22 @@ def parse_arguments():
     except ValueError:
         logger.warning(f"Invalid BATCH_SIZE value '{env_batch_size}', using default 100")
         default_batch_size = 100
+
+    # Validate and convert DOWNLOAD_WORKERS to int
+    default_download_workers = 1
+    try:
+        default_download_workers = int(env_download_workers)
+        if default_download_workers < 1:
+            logger.warning(
+                f"DOWNLOAD_WORKERS must be at least 1, got {default_download_workers}. Using default 1."
+            )
+            default_download_workers = 1
+    except ValueError:
+        logger.warning(
+            f"Invalid DOWNLOAD_WORKERS value '{env_download_workers}', using default 1"
+        )
+        default_download_workers = 1
+
 
     parser = argparse.ArgumentParser(
         description='Query and download Salesforce attachments'
@@ -93,6 +102,12 @@ def parse_arguments():
         help=f'Number of ParentIds per SOQL query batch (default: {default_batch_size})'
     )
     parser.add_argument(
+        '--download-workers',
+        type=int,
+        default=default_download_workers,
+        help=f'Parallel downloads per bucket (default: {default_download_workers})'
+    )
+    parser.add_argument(
         '--verbose',
         action='store_true',
         default=env_verbose,
@@ -114,7 +129,6 @@ def parse_arguments():
     args = parser.parse_args()
 
     # Add additional configuration to args
-    args.chunk_size = chunk_size
     args.log_file = Path(env_log_file)
     
     # Determine console log level based on flags (priority: debug > verbose > default INFO)
@@ -125,6 +139,13 @@ def parse_arguments():
     else:
         # Default to INFO so user sees progress (not silent)
         args.console_log_level = logging.INFO
+
+    if args.download_workers < 1:
+        logger.warning(
+            f"--download-workers must be at least 1, got {args.download_workers}. Using default 1."
+        )
+        args.download_workers = 1
+
 
     # Resolve records directory from CLI or env
     if args.records_dir:

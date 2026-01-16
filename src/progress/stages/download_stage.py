@@ -14,7 +14,16 @@ DOWNLOAD_STAGE_CONFIG = StageConfig(
     name="file_downloads",
     description="Downloading attachment files",
     message_template="Downloading {current}/{total} files - {current_file}",
-    details_fields=["current_file", "file_size", "speed", "success_count", "failed_count", "skipped_count", "bytes_transferred"]
+    details_fields=[
+        "current_file",
+        "bucket",
+        "file_size",
+        "speed",
+        "success_count",
+        "failed_count",
+        "skipped_count",
+        "bytes_transferred"
+    ]
 )
 
 
@@ -40,6 +49,7 @@ class DownloadStage(WorkflowStage):
         self,
         completed_files: int,
         current_file: Optional[str] = None,
+        bucket: Optional[str] = None,
         file_size: Optional[int] = None,
         success_count: Optional[int] = None,
         failed_count: Optional[int] = None,
@@ -80,6 +90,8 @@ class DownloadStage(WorkflowStage):
         details = {}
         if display_file:
             details['current_file'] = display_file
+        if bucket:
+            details['bucket'] = bucket
         if file_size_str:
             details['file_size'] = file_size_str
         if speed_str:

@@ -6,12 +6,17 @@ using authentication credentials from sf CLI.
 """
 
 import logging
+import os
 import requests
 from pathlib import Path
 
-from src.exceptions import SFAPIError
+from src.exceptions import SFAuthError, SFAPIError, SFNetworkError
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_CONNECT_TIMEOUT = 10
+DEFAULT_READ_TIMEOUT = 60
+DEFAULT_TMP_DIR_NAME = ".tmp_downloads"
 
 
 class SalesforceClient:
@@ -48,7 +53,8 @@ class SalesforceClient:
         self,
         attachment_id: str,
         output_path: Path,
-        chunk_size: int = 8192
+        chunk_size: int = 8192,
+        timeout: tuple[int, int] = (DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT)
     ) -> int:
         """
         Download an attachment file from Salesforce.
@@ -60,6 +66,7 @@ class SalesforceClient:
             attachment_id: Salesforce Attachment ID
             output_path: Local file path to save downloaded content
             chunk_size: Size of chunks for streaming download (default: 8KB)
+            timeout: (connect, read) timeout tuple in seconds
 
         Returns:
             Number of bytes downloaded
@@ -77,37 +84,61 @@ class SalesforceClient:
             logger.debug(f"URL: {url}")
 
             # Make GET request with streaming enabled
-            response = self.session.get(url, stream=True)
+            response = self.session.get(url, stream=True, timeout=timeout)
 
             # Check for HTTP errors
             if response.status_code == 404:
                 logger.error(f"Attachment not found: {attachment_id}")
                 raise SFAPIError(f"Attachment {attachment_id} not found (404)")
 
+            if response.status_code in (401, 403):
+                logger.error(f"Authentication failed downloading {attachment_id}: {response.status_code}")
+                raise SFAuthError(f"Authentication failed (HTTP {response.status_code})")
+
+            if response.status_code >= 400:
+                logger.error(f"Service error downloading {attachment_id}: {response.status_code}")
+                raise SFNetworkError(f"Service error (HTTP {response.status_code})")
+
             response.raise_for_status()
 
             # Create parent directory if needed
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Download file in chunks (memory efficient)
+            temp_dir_path = output_path.parent.parent / DEFAULT_TMP_DIR_NAME
+            temp_dir_path.mkdir(parents=True, exist_ok=True)
+
+            # Download to temporary file first, then atomically replace.
+            temp_name = f"{output_path.name}.{attachment_id}.part"
+            temp_path = temp_dir_path / temp_name
+
             bytes_downloaded = 0
-            with output_path.open('wb') as f:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:  # Filter out keep-alive chunks
-                        f.write(chunk)
-                        bytes_downloaded += len(chunk)
+            try:
+                with temp_path.open('wb') as f:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:  # Filter out keep-alive chunks
+                            f.write(chunk)
+                            bytes_downloaded += len(chunk)
+
+                os.replace(temp_path, output_path)
+
+            finally:
+                try:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                except OSError:
+                    pass
 
             logger.debug(f"Downloaded {bytes_downloaded} bytes to: {output_path.name}")
-            
+
             return bytes_downloaded
 
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP error downloading {attachment_id}: {e}")
-            raise SFAPIError(f"HTTP error: {e}")
+            raise SFNetworkError(f"HTTP error: {e}")
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Request failed for {attachment_id}: {e}")
-            raise SFAPIError(f"Request failed: {e}")
+            raise SFNetworkError(f"Request failed: {e}")
 
         except IOError as e:
             logger.error(f"File write error for {output_path}: {e}")
