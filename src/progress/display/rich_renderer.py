@@ -248,23 +248,37 @@ class RichProgressRenderer(ProgressRenderer):
         }
         return icons.get(status, "•")
 
+    def _get_panel_width(self) -> int:
+        """Get a stable panel width based on terminal size."""
+        terminal_width = getattr(self.console, "width", 0) or 0
+        min_width = 80
+        if terminal_width:
+            return max(min_width, terminal_width)
+        return min_width
+
     def _create_layout(self):
         """Create the Rich layout for display."""
+        panel_width = self._get_panel_width()
+
         # Main progress bars
         progress_panel = Panel(
             self._progress,
             title="Salesforce Attachments Extraction",
             border_style="blue",
-            padding=(1, 2)
+            padding=(1, 2),
+            width=panel_width,
+            expand=False
         )
         
         # Detailed information table
-        details_table = self._create_details_table()
+        details_table = self._create_details_table(panel_width)
         details_panel = Panel(
             details_table,
             title="Stage Details",
             border_style="dim",
-            padding=(0, 1)
+            padding=(0, 1),
+            width=panel_width,
+            expand=False
         )
         
         # Overall statistics
@@ -273,7 +287,9 @@ class RichProgressRenderer(ProgressRenderer):
             stats_text,
             title="Summary",
             border_style="green",
-            padding=(0, 1)
+            padding=(0, 1),
+            width=panel_width,
+            expand=False
         )
         
         # Combine into main table
@@ -285,9 +301,10 @@ class RichProgressRenderer(ProgressRenderer):
         
         return main_table
 
-    def _create_details_table(self) -> Table:
+    def _create_details_table(self, panel_width: int) -> Table:
         """Create detailed information table."""
-        table = Table(show_header=True, header_style="bold", expand=True)
+        table_width = max(80, panel_width - 4)
+        table = Table(show_header=True, header_style="bold", expand=False, width=table_width)
         table.add_column("Stage", style="cyan", no_wrap=True, width=16)
         table.add_column("Status", style="white", no_wrap=True, width=9)
         table.add_column("Progress", style="blue", no_wrap=True, width=16)
@@ -305,12 +322,10 @@ class RichProgressRenderer(ProgressRenderer):
             # Format details
             details_parts = []
             if stage_progress.details:
-                for key, value in stage_progress.details.items():
-                    if key in ['current_file', 'current_csv', 'current_batch', 'csv_name']:
-                        if value:
-                            details_parts.append(f"{key}: {value}")
-                    elif key in ['speed', 'throughput']:
-                        details_parts.append(f"{key}: {value}")
+                from src.progress.utils import get_detail_display_items
+
+                for label, value in get_detail_display_items(stage_name, stage_progress.details):
+                    details_parts.append(f"{label}: {value}")
             
             if stage_progress.error:
                 details_parts.append(f"Error: {stage_progress.error}")
@@ -367,6 +382,7 @@ class RichProgressRenderer(ProgressRenderer):
         """Display workflow completion summary panel."""
         with self._lock:
             try:
+                panel_width = self._get_panel_width()
                 summary_table = Table.grid(padding=(0, 2))
                 summary_table.add_column(style="cyan bold")
                 summary_table.add_column()
@@ -384,6 +400,8 @@ class RichProgressRenderer(ProgressRenderer):
                     title=success_text,
                     border_style="green",
                     padding=(1, 2),
+                    width=panel_width,
+                    expand=False
                 )
 
                 self.console.print()
