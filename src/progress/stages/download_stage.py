@@ -73,16 +73,13 @@ class DownloadStage(WorkflowStage):
             status_parts.append(f"⊙{skipped_count}")
         
         # Build message
-        message_parts = [f"Downloaded {completed_files}/{self.progress.total} files"]
-        if current_file:
-            message_parts.append(f"Current: {current_file}")
-        
-        message = " | ".join(message_parts)
+        message = f"Downloaded {completed_files}/{self.progress.total} files"
+        display_file = self._truncate_filename(current_file) if current_file else None
         
         # Build details
         details = {}
-        if current_file:
-            details['current_file'] = current_file
+        if display_file:
+            details['current_file'] = display_file
         if file_size_str:
             details['file_size'] = file_size_str
         if speed_str:
@@ -103,6 +100,14 @@ class DownloadStage(WorkflowStage):
             details=details if details else None
         )
 
+    def _truncate_filename(self, filename: Optional[str], max_length: int = 40) -> Optional[str]:
+        """Truncate filename to avoid UI width jumps."""
+        if not filename:
+            return filename
+        if len(filename) <= max_length:
+            return filename
+        return f"{filename[:max_length - 3]}..."
+
     def complete_downloads(self, total_downloaded: int, total_failed: int = 0, total_skipped: int = 0):
         """Mark download phase as completed."""
         message = f"Downloaded {total_downloaded} file(s)"
@@ -112,7 +117,8 @@ class DownloadStage(WorkflowStage):
             message += f" ({total_skipped} skipped)"
         
         self.complete(message=message)
-
+ 
     def get_display_info(self) -> Dict[str, Any]:
+
         """Get download-specific information for display."""
         return super().get_display_info()

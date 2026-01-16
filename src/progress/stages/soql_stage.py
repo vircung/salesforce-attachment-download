@@ -100,11 +100,12 @@ class SoqlQueryStage(WorkflowStage):
         if batch_num is not None or total_attachments is not None:
             details = {}
             if batch_num is not None:
-                details["batch_num"] = batch_num
+                details["current_batch"] = batch_num
             if total_attachments is not None:
                 details["total_attachments"] = total_attachments
             
             self.update_progress(
+                current=batch_num if batch_num is not None else self.progress.current,
                 message=message,
                 details=details if details else None
             )

@@ -57,12 +57,8 @@ class ProgressAwareConsoleHandler(logging.StreamHandler):
             
             # Progress mode is active - handle based on log level
             if record.levelno >= logging.ERROR:
-                # ERROR and CRITICAL: Display immediately in progress UI
-                if self._logging_manager:
-                    self._logging_manager.display_critical_error(record)
-                else:
-                    # Fallback to stderr if no manager
-                    self._emit_to_stderr(record)
+                # ERROR and CRITICAL: Suppress during progress mode
+                return
             
             elif record.levelno >= logging.WARNING:
                 # WARNING: Buffer for later display

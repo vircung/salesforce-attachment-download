@@ -101,6 +101,16 @@ class RichProgressRenderer(ProgressRenderer):
         """Stop the Rich progress display."""
         with self._lock:
             if self._live is not None:
+                # Process any pending updates before stopping
+                if self._pending_updates:
+                    self._process_pending_updates()
+                
+                # Force a final display update by invalidating cache
+                # This ensures the completed status is visible
+                self._layout_cache = None
+                layout = self._create_layout()
+                self._live.update(layout)
+                
                 self._live.stop()
                 self._live = None
                 # Clear caches
@@ -216,9 +226,16 @@ class RichProgressRenderer(ProgressRenderer):
         base_desc = f"[{color}]{status_icon} {display_name}[/{color}]"
         
         if stage_progress.message:
-            base_desc += f": {stage_progress.message}"
+            message = self._truncate_text(stage_progress.message)
+            base_desc += f": {message}"
         
         return base_desc
+
+    def _truncate_text(self, text: str, max_length: int = 60) -> str:
+        """Truncate long text to avoid panel width jumps."""
+        if len(text) <= max_length:
+            return text
+        return f"{text[:max_length - 3]}..."
 
     def _get_status_icon(self, status: StageStatus) -> str:
         """Get Unicode icon for stage status."""
@@ -270,11 +287,11 @@ class RichProgressRenderer(ProgressRenderer):
 
     def _create_details_table(self) -> Table:
         """Create detailed information table."""
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("Stage", style="cyan", no_wrap=True)
-        table.add_column("Status", style="white")
-        table.add_column("Progress", style="blue")
-        table.add_column("Details", style="dim")
+        table = Table(show_header=True, header_style="bold", expand=True)
+        table.add_column("Stage", style="cyan", no_wrap=True, width=16)
+        table.add_column("Status", style="white", no_wrap=True, width=9)
+        table.add_column("Progress", style="blue", no_wrap=True, width=16)
+        table.add_column("Details", style="dim", overflow="fold")
         
         for stage_name, stage_progress in self._stage_data.items():
             # Format progress
@@ -290,7 +307,8 @@ class RichProgressRenderer(ProgressRenderer):
             if stage_progress.details:
                 for key, value in stage_progress.details.items():
                     if key in ['current_file', 'current_csv', 'current_batch']:
-                        details_parts.append(f"{key}: {value}")
+                        if value:
+                            details_parts.append(f"{key}: {value}")
                     elif key in ['speed', 'throughput']:
                         details_parts.append(f"{key}: {value}")
             

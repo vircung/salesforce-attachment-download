@@ -22,6 +22,7 @@ from src.workflows.common import (
 )
 from src.exceptions import SFQueryError, SFAuthError, SFAPIError
 from src.progress.core import ProgressTracker
+from src.progress.core.stage import StageStatus
 from src.progress.stages import CsvProcessingStage, SoqlQueryStage, DownloadStage
 from src.download.downloader import download_attachments
 
@@ -95,12 +96,20 @@ def process_csv_records_workflow(
     # Update CSV stage with discovery results
     csv_stage.update_discovery(len(csv_records))
     csv_stage.start_processing(len(csv_records))
+    total_records_found = sum(csv_info.total_records for csv_info in csv_records)
+    csv_stage.update_processing(
+        completed_files=len(csv_records),
+        total_records=total_records_found
+    )
+    csv_stage.complete(f"Processed {len(csv_records)} CSV files")
     
     # Calculate total batches across all CSV files for SOQL stage initialization
     total_batches_all_csvs = sum(csv_info.total_batches for csv_info in csv_records)
     
     # Start SOQL stage with total batch count
     soql_stage.start_querying(total_batches_all_csvs)
+    if total_batches_all_csvs == 0:
+        soql_stage.complete("No batches to query")
 
     # Statistics tracking
     stats = {
@@ -123,11 +132,12 @@ def process_csv_records_workflow(
         logger.info(f"Batches: {csv_info.total_batches}")
         
         # Update CSV processing progress
-        csv_stage.update_processing(
-            completed_files=csv_idx - 1,
-            current_csv=csv_info.csv_name,
-            current_records=csv_info.total_records
-        )
+        if csv_stage.progress.status != StageStatus.COMPLETED:
+            csv_stage.update_processing(
+                completed_files=csv_idx - 1,
+                current_csv=csv_info.csv_name,
+                current_records=csv_info.total_records
+            )
 
         try:
             # Create output subdirectories for this CSV
@@ -194,6 +204,11 @@ def process_csv_records_workflow(
                     total_attachments=stats['total_attachments'] + total_attachments  # Overall total
                 )
 
+                if cumulative_batches_completed + batch_idx + 1 == total_batches_all_csvs:
+                    soql_stage.complete(
+                        f"Completed {total_batches_all_csvs} batches, found {stats['total_attachments'] + total_attachments} attachments"
+                    )
+
                 
 
             # Merge all batch results into single CSV
@@ -202,8 +217,18 @@ def process_csv_records_workflow(
 
             merged_count = merge_csv_files(batch_csv_paths, merged_csv_path)
             
-
+            # Refresh SOQL stage before downloads
+            soql_stage.update_progress(
+                message=f"SOQL complete for {csv_info.csv_name}; starting downloads",
+                details={
+                    "csv_name": csv_info.csv_name,
+                    "current_batch": cumulative_batches_completed + csv_info.total_batches,
+                    "total_attachments": stats['total_attachments'] + merged_count
+                }
+            )
+ 
             # Download attachments if enabled
+
             downloaded_count = 0
             if download and merged_count > 0:
                 logger.info(f"Downloading {merged_count} attachment(s) to: {csv_files_dir}")
@@ -255,8 +280,13 @@ def process_csv_records_workflow(
             # Update cumulative batch counter for next CSV
             cumulative_batches_completed += csv_info.total_batches
             
-            # Complete this CSV in the CSV stage
-            csv_stage.complete_file(csv_info.csv_name, csv_info.total_records, stats['total_records'])
+            # Update CSV stage progress to reflect completion of this file
+            csv_stage.update_processing(
+                completed_files=csv_idx,  # Increment to current file number
+                current_csv=csv_info.csv_name,
+                current_records=csv_info.total_records,
+                total_records=stats['total_records']
+            )
             
 
         except SFAuthError as e:
@@ -318,6 +348,12 @@ def process_csv_records_workflow(
             
             # Continue processing other CSV files
 
+    # Ensure SOQL stage reflects completion before summary
+    if soql_stage.progress.status == StageStatus.RUNNING:
+        soql_stage.complete(
+            f"Completed {stats['total_batches']} batches, found {stats['total_attachments']} attachments"
+        )
+
     # Final summary
     log_section_header("WORKFLOW SUMMARY")
     logger.info(f"Total CSV files: {stats['total_csv_files']}")
@@ -325,24 +361,32 @@ def process_csv_records_workflow(
     logger.info(f"Total batches executed: {stats['total_batches']}")
     logger.info(f"Total attachments found: {stats['total_attachments']}")
 
+    # Complete stages BEFORE returning (before progress tracker context exits)
     # Always complete stages appropriately regardless of partial failures
     if failed_files:
         logger.warning(f"Failed to process {len(failed_files)} file(s): {', '.join(failed_files)}")
         
         # If some files failed but we processed others successfully
         if stats['total_batches'] > 0:
+            # CSV stage partially succeeded
+            if csv_stage.progress.status != StageStatus.COMPLETED:
+                csv_stage.complete(f"Processed {stats['total_csv_files'] - len(failed_files)}/{stats['total_csv_files']} CSV files")
             # SOQL stage succeeded for processed files
-            soql_stage.complete(f"Completed {stats['total_batches']} batches, found {stats['total_attachments']} attachments")
+            if soql_stage.progress.status != StageStatus.COMPLETED:
+                soql_stage.complete(f"Completed {stats['total_batches']} batches, found {stats['total_attachments']} attachments")
         else:
             # No batches were processed successfully
-            soql_stage.fail(f"Failed to process any files: {', '.join(failed_files)}")
-            
-        # CSV stage failed due to file processing errors
-        csv_stage.fail(f"Failed to process {len(failed_files)} file(s)")
+            if csv_stage.progress.status != StageStatus.COMPLETED:
+                csv_stage.fail(f"Failed to process {len(failed_files)} file(s)")
+            if soql_stage.progress.status != StageStatus.COMPLETED:
+                soql_stage.fail(f"Failed to process any files: {', '.join(failed_files)}")
     else:
         logger.info("All CSV files processed successfully!")
-        csv_stage.complete(f"Processed {stats['total_csv_files']} CSV files")
-        soql_stage.complete(f"Completed {stats['total_batches']} batches, found {stats['total_attachments']} attachments")
+        # Mark both stages as complete with final progress update
+        if csv_stage.progress.status != StageStatus.COMPLETED:
+            csv_stage.complete(f"Processed {stats['total_csv_files']} CSV files")
+        if soql_stage.progress.status != StageStatus.COMPLETED:
+            soql_stage.complete(f"Completed {stats['total_batches']} batches, found {stats['total_attachments']} attachments")
 
     
 
