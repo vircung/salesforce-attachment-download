@@ -117,8 +117,8 @@ class DownloadStage(WorkflowStage):
             message += f" ({total_skipped} skipped)"
         
         self.complete(message=message)
- 
-    def get_display_info(self) -> Dict[str, Any]:
 
+    def get_display_info(self) -> Dict[str, Any]:
         """Get download-specific information for display."""
         return super().get_display_info()
+

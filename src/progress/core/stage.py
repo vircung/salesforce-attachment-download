@@ -150,6 +150,8 @@ class ProgressStage(ABC):
     def complete(self, message: str = ""):
         """Mark stage as completed."""
         with self._lock:
+            if self._progress.status in (StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.SKIPPED):
+                return
             self._progress.status = StageStatus.COMPLETED
             if message:
                 self._progress.message = message
@@ -158,25 +160,30 @@ class ProgressStage(ABC):
                 self._progress.current = self._progress.total
         
         self._notify_callbacks()
-
+ 
     def fail(self, error: str, message: str = ""):
         """Mark stage as failed."""
         with self._lock:
+            if self._progress.status in (StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.SKIPPED):
+                return
             self._progress.status = StageStatus.FAILED
             self._progress.error = error
             if message:
                 self._progress.message = message
         
         self._notify_callbacks()
-
+ 
     def skip(self, message: str = ""):
         """Mark stage as skipped."""
         with self._lock:
+            if self._progress.status in (StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.SKIPPED):
+                return
             self._progress.status = StageStatus.SKIPPED
             if message:
                 self._progress.message = message
         
         self._notify_callbacks()
+
 
     def reset(self) -> None:
         """Reset stage to initial state."""

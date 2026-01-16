@@ -6,13 +6,17 @@ Provides fallback progress display using tqdm for broader compatibility.
 
 import sys
 from threading import RLock
-from typing import Dict, Optional, TextIO
+from typing import Dict, Optional, TextIO, TYPE_CHECKING
 
 try:
     from tqdm import tqdm
     TQDM_AVAILABLE = True
 except ImportError:
     TQDM_AVAILABLE = False
+    tqdm = None
+
+if TYPE_CHECKING:
+    from tqdm import tqdm as tqdm_type
 
 from src.progress.core.tracker import ProgressRenderer
 from src.progress.core.stage import StageStatus, StageProgress
@@ -39,7 +43,7 @@ class TqdmProgressRenderer(ProgressRenderer):
         self.file = file or sys.stderr
         self.disable_on_non_tty = disable_on_non_tty
         self._lock = RLock()
-        self._progress_bars: Dict[str, 'tqdm'] = {}
+        self._progress_bars: Dict[str, "tqdm_type"] = {}
         self._stage_data: Dict[str, StageProgress] = {}
         self._is_started = False
 
@@ -94,6 +98,9 @@ class TqdmProgressRenderer(ProgressRenderer):
 
     def _create_progress_bar(self, stage_name: str, stage_progress: StageProgress):
         """Create a new tqdm progress bar for a stage."""
+        if tqdm is None:
+            return
+
         # Format description
         description = self._format_description(stage_name, stage_progress)
         
@@ -189,7 +196,7 @@ class TqdmProgressRenderer(ProgressRenderer):
         if stage_progress.details:
             details_parts = []
             for key, value in stage_progress.details.items():
-                if key in ['current_file', 'current_csv', 'current_batch'] and value:
+                if key in ['current_file', 'current_csv', 'current_batch', 'csv_name'] and value:
                     # Shorten file names for display
                     if isinstance(value, str) and len(value) > 20:
                         value = "..." + value[-17:]

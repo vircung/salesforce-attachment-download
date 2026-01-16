@@ -98,10 +98,9 @@ def process_csv_records_workflow(
     csv_stage.start_processing(len(csv_records))
     total_records_found = sum(csv_info.total_records for csv_info in csv_records)
     csv_stage.update_processing(
-        completed_files=len(csv_records),
+        completed_files=0,
         total_records=total_records_found
     )
-    csv_stage.complete(f"Processed {len(csv_records)} CSV files")
     
     # Calculate total batches across all CSV files for SOQL stage initialization
     total_batches_all_csvs = sum(csv_info.total_batches for csv_info in csv_records)
@@ -134,7 +133,7 @@ def process_csv_records_workflow(
         # Update CSV processing progress
         if csv_stage.progress.status != StageStatus.COMPLETED:
             csv_stage.update_processing(
-                completed_files=csv_idx - 1,
+                completed_files=csv_idx,
                 current_csv=csv_info.csv_name,
                 current_records=csv_info.total_records
             )
@@ -155,7 +154,7 @@ def process_csv_records_workflow(
             soql_stage.update_progress(
                 message=f"Processing {csv_info.csv_name} ({csv_info.total_batches} batches)",
                 details={
-                    "csv_name": csv_info.csv_name,
+                    "current_csv": csv_info.csv_name,
                     "csv_batches": csv_info.total_batches
                 }
             )
@@ -221,12 +220,12 @@ def process_csv_records_workflow(
             soql_stage.update_progress(
                 message=f"SOQL complete for {csv_info.csv_name}; starting downloads",
                 details={
-                    "csv_name": csv_info.csv_name,
+                    "current_csv": csv_info.csv_name,
                     "current_batch": cumulative_batches_completed + csv_info.total_batches,
                     "total_attachments": stats['total_attachments'] + merged_count
                 }
             )
- 
+
             # Download attachments if enabled
 
             downloaded_count = 0

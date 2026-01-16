@@ -306,7 +306,7 @@ class RichProgressRenderer(ProgressRenderer):
             details_parts = []
             if stage_progress.details:
                 for key, value in stage_progress.details.items():
-                    if key in ['current_file', 'current_csv', 'current_batch']:
+                    if key in ['current_file', 'current_csv', 'current_batch', 'csv_name']:
                         if value:
                             details_parts.append(f"{key}: {value}")
                     elif key in ['speed', 'throughput']:

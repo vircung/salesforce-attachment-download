@@ -153,11 +153,6 @@ class ProgressTracker:
             if not self._is_started:
                 return
             
-            # Give renderers a moment to process final stage updates
-            # This ensures completion status is visible before display stops
-            import time
-            time.sleep(0.2)
-            
             # Stop renderer first
             if self._renderer:
                 try:
