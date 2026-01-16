@@ -6,7 +6,7 @@ Configuration dataclass and renderer selection improvements with thread safety.
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from threading import RLock
 from typing import Dict, Type, Optional
 
@@ -24,18 +24,7 @@ class ProgressConfig:
     rich_refresh_rate: int = 4  # Rich renderer refresh rate (Hz)
     debounce_interval: float = 0.05  # Debouncing for rapid updates
     
-    # Memory management
-    max_details_entries: int = 50  # Maximum entries in details dict
-    max_history_size: int = 100  # Maximum progress history entries
-    
-    # Error handling
-    max_callback_errors: int = 5  # Max callback errors before disabling
-    callback_timeout: float = 1.0  # Callback timeout in seconds
-    log_callback_errors: bool = True  # Whether to log callback errors
-    
     # Performance tuning
-    enable_progress_caching: bool = True  # Cache progress copies
-    cache_dirty_threshold: int = 10  # Updates before forcing cache refresh
     enable_update_debouncing: bool = True  # Debounce rapid updates
     
     # Thread safety

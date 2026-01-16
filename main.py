@@ -42,10 +42,10 @@ def main():
 
         # Initialize progress tracker based on CLI argument
         progress_mode = ProgressMode(args.progress)
-        progress_tracker = ProgressTracker(mode=progress_mode)
-        
-        # Connect logging and progress systems before starting
-        progress_tracker.set_logging_manager(logging_manager)
+        progress_tracker = ProgressTracker(
+            mode=progress_mode,
+            logging_manager=logging_manager,
+        )
         
         # Execute entire workflow with progress tracking context
         with progress_tracker:

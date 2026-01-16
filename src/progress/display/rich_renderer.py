@@ -22,7 +22,6 @@ from rich.text import Text
 
 from src.progress.core.tracker import ProgressRenderer
 from src.progress.core.stage import StageStatus, StageProgress
-from src.logging.critical_display import CriticalMessageDisplay
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +66,6 @@ class RichProgressRenderer(ProgressRenderer):
         self._pending_updates: Dict[str, StageProgress] = {}
         self._layout_cache: Optional[object] = None
         self._layout_cache_time = 0.0
-        
-        # Critical message display integration
-        self._critical_display = CriticalMessageDisplay(console=self.console)
 
     def is_available(self) -> bool:
         """Check if Rich is available."""
@@ -325,42 +321,59 @@ class RichProgressRenderer(ProgressRenderer):
         """Create summary statistics text."""
         elapsed = time.time() - self._start_time
         elapsed_formatted = f"{elapsed:.1f}s"
-        
+
         # Count stages by status
         status_counts = {}
         for stage_progress in self._stage_data.values():
             status = stage_progress.status
             status_counts[status] = status_counts.get(status, 0) + 1
-        
+
         # Format statistics
         stats_parts = [f"Elapsed: {elapsed_formatted}"]
-        
+
         if StageStatus.COMPLETED in status_counts:
             stats_parts.append(f"✅ {status_counts[StageStatus.COMPLETED]} completed")
-        
+
         if StageStatus.RUNNING in status_counts:
             stats_parts.append(f"🔄 {status_counts[StageStatus.RUNNING]} running")
-        
+
         if StageStatus.FAILED in status_counts:
             stats_parts.append(f"❌ {status_counts[StageStatus.FAILED]} failed")
-        
+
         if StageStatus.SKIPPED in status_counts:
             stats_parts.append(f"⏭️ {status_counts[StageStatus.SKIPPED]} skipped")
-        
+
         return Text(" | ".join(stats_parts))
 
-    def display_error_panel(self, record: logging.LogRecord) -> None:
-        """
-        Display an error panel during progress tracking.
-        
-        Called by LoggingManager to show critical errors immediately
-        without disrupting the progress display.
-        
-        Args:
-            record: LogRecord containing error information
-        """
-        if self._critical_display:
-            self._critical_display.display_error(record)
+    def display_completion_summary(self, stats: Dict[str, int]) -> None:
+        """Display workflow completion summary panel."""
+        with self._lock:
+            try:
+                summary_table = Table.grid(padding=(0, 2))
+                summary_table.add_column(style="cyan bold")
+                summary_table.add_column()
+
+                summary_table.add_row("CSV files processed:", f"{stats.get('total_csv_files', 0)}")
+                summary_table.add_row("Total records:", f"{stats.get('total_records', 0)}")
+                summary_table.add_row(
+                    "Total attachments:",
+                    f"{stats.get('total_attachments', 0)}",
+                )
+
+                success_text = Text("✓ WORKFLOW COMPLETE", style="bold green")
+                panel = Panel(
+                    summary_table,
+                    title=success_text,
+                    border_style="green",
+                    padding=(1, 2),
+                )
+
+                self.console.print()
+                self.console.print(panel)
+                self.console.print()
+                logger.debug("Displayed Rich completion summary")
+            except Exception as e:
+                logger.warning(f"Failed to display Rich completion summary: {e}")
 
 
 # Utility function to check Rich availability

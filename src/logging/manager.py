@@ -15,7 +15,17 @@ from threading import RLock
 from typing import List, Optional, Dict, Any, Tuple, Iterator
 
 from src.logging.handlers import ProgressAwareConsoleHandler
-from src.logging.critical_display import CriticalMessageDisplay
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.text import Text
+    RICH_AVAILABLE = True
+except ImportError:
+    Console = None
+    Panel = None
+    Text = None
+    RICH_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +65,11 @@ class LoggingManager:
         self._buffered_warnings: List[Tuple[float, str, Dict[str, Any]]] = []
         self._max_buffered_messages = 50  # Prevent memory issues
         
-        # Critical message display integration
-        self._critical_display: Optional[CriticalMessageDisplay] = None
+        # Rich console for error display (lazy initialized)
+        self._rich_console: Optional[Any] = None
         
         # Thread safety for callbacks
         self._callback_lock = RLock()
-        
-        # Progress tracker reference for integrated error display
-        self._progress_tracker: Optional[object] = None
         
     @classmethod
     def get_instance(cls) -> 'LoggingManager':
@@ -238,21 +245,74 @@ class LoggingManager:
             record: LogRecord to display
         """
         try:
-            # Use standalone critical display 
-            if not self._critical_display:
-                self._critical_display = CriticalMessageDisplay()
+            if RICH_AVAILABLE:
+                self._display_rich_error(record)
+            else:
+                self._display_fallback_error(record)
+        except Exception:
+            self._display_fallback_error(record)
+    
+    def _display_rich_error(self, record: logging.LogRecord) -> None:
+        """Display error using Rich formatting."""
+        try:
+            if Console is None or Panel is None or Text is None:
+                self._display_fallback_error(record)
+                return
+
+            if not self._rich_console:
+                self._rich_console = Console(stderr=True)
+
+            message = record.getMessage()
+
+            # Create styled text
+            error_text = Text()
+            error_text.append("ERROR", style="bold red")
+
+            if hasattr(record, "name") and record.name:
+                error_text.append(f" ({record.name})", style="dim red")
+
+            error_text.append(f": {message}", style="red")
+
+            # Add location information if available
+            if hasattr(record, "funcName") and hasattr(record, "lineno"):
+                location = f"{record.funcName}() line {record.lineno}"
+                error_text.append(f"\nLocation: {location}", style="dim")
+
+            # Create error panel
+            panel = Panel(
+                error_text,
+                title="⚠️  Critical Error",
+                border_style="red",
+                padding=(0, 1),
+                expand=False,
+            )
+
+            # Display immediately to stderr
+            if self._rich_console:
+                self._rich_console.print(panel)
+        except Exception:
+            self._display_fallback_error(record)
+    
+    def _display_fallback_error(self, record: logging.LogRecord) -> None:
+        """Fallback error display using plain text to stderr."""
+        try:
+            message = record.getMessage()
+            error_line = f"ERROR: {message}"
             
-            self._critical_display.display_error(record)
+            if hasattr(record, 'name') and record.name:
+                error_line += f" ({record.name})"
             
-        except Exception as e:
-            # Final fallback to stderr if Rich display fails
+            if hasattr(record, 'funcName') and hasattr(record, 'lineno'):
+                error_line += f" [{record.funcName}:{record.lineno}]"
+            
+            sys.stderr.write(f"{error_line}\n")
+            sys.stderr.flush()
+        except Exception:
             try:
-                message = record.getMessage() if hasattr(record, 'getMessage') else str(record.msg)
-                sys.stderr.write(f"ERROR: {message}\n")
-                sys.stderr.flush()
-            except Exception:
                 sys.stderr.write(f"ERROR: {record.msg}\n")
                 sys.stderr.flush()
+            except Exception:
+                pass
     
     def _display_buffered_warnings(self) -> None:
         """Display all buffered warning messages when progress mode ends."""
@@ -277,15 +337,7 @@ class LoggingManager:
             # Clear buffer
             self._buffered_warnings.clear()
     
-    def set_critical_display(self, display: Optional[CriticalMessageDisplay]) -> None:
-        """Set the critical message display handler."""
-        with self._lock:
-            self._critical_display = display
     
-    def set_progress_tracker(self, progress_tracker: Optional[object]) -> None:
-        """Set progress tracker reference for integrated error display."""
-        with self._lock:
-            self._progress_tracker = progress_tracker
     
     def cleanup(self) -> None:
         """
@@ -322,12 +374,6 @@ class LoggingManager:
                 # Ensure cleanup doesn't fail completely
                 sys.stderr.write(f"Warning: Logging manager cleanup error: {e}\n")
     
-    def __del__(self) -> None:
-        """Destructor - ensure cleanup on garbage collection."""
-        try:
-            self.cleanup()
-        except Exception:
-            pass  # Avoid exceptions during garbage collection
 
 
 # Convenience function to maintain backward compatibility

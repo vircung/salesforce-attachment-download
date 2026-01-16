@@ -6,25 +6,22 @@ Progress tracking for SOQL query execution and batch processing.
 
 from typing import Dict, Any, Optional
 
-from src.progress.core.stage import ProgressStage
+from src.progress.stages.base import WorkflowStage, StageConfig
+
+# Configuration for SOQL query stage
+SOQL_STAGE_CONFIG = StageConfig(
+    name="soql_query",
+    description="Executing SOQL queries for attachments",
+    message_template="Batch {current_batch}/{total} - Found {total_attachments} attachments",
+    details_fields=["current_batch", "batch_size", "batch_records", "total_attachments", "csv_name"]
+)
 
 
-class SoqlQueryStage(ProgressStage):
-    """
-    Progress stage for SOQL query operations.
+class SoqlQueryStage(WorkflowStage):
+    """Progress stage for SOQL query operations."""
     
-    Tracks:
-    - Total batches to execute
-    - Current batch being processed
-    - Records found per batch
-    - Cumulative attachments found
-    """
-
     def __init__(self):
-        super().__init__(
-            name="soql_query",
-            description="Executing SOQL queries for attachments"
-        )
+        super().__init__(SOQL_STAGE_CONFIG)
 
     def start_querying(self, total_batches: int, csv_name: Optional[str] = None):
         """Start SOQL querying phase."""
@@ -79,68 +76,41 @@ class SoqlQueryStage(ProgressStage):
         self.update_progress(
             current=completed_batches,
             message=" | ".join(message_parts),
-            details=details
+            details=details if details else None
         )
 
     def complete_batch(
         self, 
-        batch_num: int, 
-        records_found: int, 
-        total_attachments: int
+        message: str = "",
+        batch_num: Optional[int] = None,
+        records_found: Optional[int] = None,
+        total_attachments: Optional[int] = None
     ):
-        """Mark a batch as completed."""
-        current = self.progress.current + 1
+        """Mark batch as complete."""
+        # Build message from parameters if not provided
+        if not message and batch_num is not None:
+            msg_parts = [f"Batch {batch_num}"]
+            if records_found is not None:
+                msg_parts.append(f"found {records_found}")
+            if total_attachments is not None:
+                msg_parts.append(f"total {total_attachments}")
+            message = " ".join(msg_parts)
         
-        self.update_progress(
-            current=current,
-            message=f"Batch {batch_num} complete: {records_found} attachments",
-            details={
-                "last_batch": batch_num,
-                "last_batch_records": records_found,
-                "total_attachments": total_attachments
-            }
-        )
-
-    def start_csv_batches(self, csv_name: str, total_batches: int):
-        """Start processing batches for a specific CSV."""
-        self.update_progress(
-            current=0,
-            total=total_batches,
-            message=f"Processing {csv_name} ({total_batches} batches)",
-            details={
-                "csv_name": csv_name,
-                "csv_batches": total_batches
-            }
-        )
+        # Update with current progress
+        if batch_num is not None or total_attachments is not None:
+            details = {}
+            if batch_num is not None:
+                details["batch_num"] = batch_num
+            if total_attachments is not None:
+                details["total_attachments"] = total_attachments
+            
+            self.update_progress(
+                message=message,
+                details=details if details else None
+            )
+        else:
+            self.complete(message)
 
     def get_display_info(self) -> Dict[str, Any]:
-        """Get SOQL query display information."""
-        progress = self.progress
-        
-        info = {
-            "stage": "SOQL Queries",
-            "status": progress.status.value,
-            "progress": f"{progress.current}/{progress.total}" if progress.total else str(progress.current),
-            "details": []
-        }
-        
-        # Add current batch info
-        if "current_batch" in progress.details:
-            info["details"].append(f"Batch: {progress.details['current_batch']}")
-        
-        # Add CSV being processed
-        if "csv_name" in progress.details:
-            info["details"].append(f"CSV: {progress.details['csv_name']}")
-        
-        # Add batch size
-        if "batch_size" in progress.details:
-            info["details"].append(f"Batch size: {progress.details['batch_size']}")
-        
-        # Add records found
-        if "batch_records" in progress.details:
-            info["details"].append(f"Batch records: {progress.details['batch_records']}")
-        
-        if "total_attachments" in progress.details:
-            info["details"].append(f"Total attachments: {progress.details['total_attachments']}")
-        
-        return info
+        """Get SOQL-specific information for display."""
+        return super().get_display_info()

@@ -28,10 +28,8 @@ Usage:
 
 from src.logging.manager import LoggingManager
 from src.logging.handlers import ProgressAwareConsoleHandler
-from src.logging.critical_display import CriticalMessageDisplay
 
 __all__ = [
     'LoggingManager',
-    'ProgressAwareConsoleHandler', 
-    'CriticalMessageDisplay'
+    'ProgressAwareConsoleHandler'
 ]

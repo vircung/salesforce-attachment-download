@@ -7,25 +7,22 @@ Progress tracking for CSV file discovery, processing, and ID extraction.
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from src.progress.core.stage import ProgressStage
+from src.progress.stages.base import WorkflowStage, StageConfig
+
+# Configuration for CSV processing stage
+CSV_STAGE_CONFIG = StageConfig(
+    name="csv_processing",
+    description="Discovering and processing CSV files",
+    message_template="Processing CSV files ({current}/{total})",
+    details_fields=["current_csv", "current_records", "total_records", "files_found"]
+)
 
 
-class CsvProcessingStage(ProgressStage):
-    """
-    Progress stage for CSV processing operations.
+class CsvProcessingStage(WorkflowStage):
+    """Progress stage for CSV processing operations."""
     
-    Tracks:
-    - CSV files discovered
-    - Current CSV being processed
-    - Records extracted per CSV
-    - Total records across all CSVs
-    """
-
     def __init__(self):
-        super().__init__(
-            name="csv_processing",
-            description="Discovering and processing CSV files"
-        )
+        super().__init__(CSV_STAGE_CONFIG)
 
     def start_discovery(self, records_dir: Path):
         """Start CSV discovery phase."""
@@ -73,61 +70,19 @@ class CsvProcessingStage(ProgressStage):
         if total_records is not None:
             details["total_records"] = total_records
         
-        message_parts = [f"Processing CSV files ({completed_files}/{self.progress.total})"]
-        
-        if current_csv:
-            message_parts.append(f"Current: {current_csv}")
-        
-        if total_records is not None:
-            message_parts.append(f"Total records: {total_records}")
-        
         self.update_progress(
             current=completed_files,
-            message=" | ".join(message_parts),
-            details=details
+            message=f"Processing CSV files ({completed_files}/{self.progress.total})",
+            details=details if details else None
         )
 
-    def complete_file(self, csv_name: str, records_count: int, total_records: int):
-        """Mark a CSV file as completed."""
-        current = self.progress.current + 1
-        
+    def complete_file(self, filename: str, file_records: int, total_records: int):
+        """Mark a CSV file as complete."""
         self.update_progress(
-            current=current,
-            message=f"Completed {csv_name} ({records_count} records)",
-            details={
-                "completed_csv": csv_name,
-                "csv_records": records_count,
-                "total_records": total_records
-            }
+            message=f"Completed {filename}: {file_records} records",
+            details={"last_file": filename, "total_records": total_records}
         )
 
     def get_display_info(self) -> Dict[str, Any]:
-        """Get CSV processing display information."""
-        progress = self.progress
-        
-        info = {
-            "stage": "CSV Processing",
-            "status": progress.status.value,
-            "progress": f"{progress.current}/{progress.total}" if progress.total else str(progress.current),
-            "details": []
-        }
-        
-        # Add current file info
-        if "current_csv" in progress.details:
-            info["details"].append(f"Processing: {progress.details['current_csv']}")
-        
-        if "current_file" in progress.details:
-            info["details"].append(f"File: {progress.details['current_file']}")
-        
-        # Add record counts
-        if "total_records" in progress.details:
-            info["details"].append(f"Total records: {progress.details['total_records']}")
-        
-        if "current_records" in progress.details:
-            info["details"].append(f"Current: {progress.details['current_records']} records")
-        
-        # Add files found during discovery
-        if "files_found" in progress.details:
-            info["details"].append(f"Files found: {progress.details['files_found']}")
-        
-        return info
+        """Get CSV-specific information for display."""
+        return super().get_display_info()

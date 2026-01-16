@@ -5,16 +5,15 @@ Main progress tracker class that coordinates multiple stages and renderers.
 """
 
 import logging
-import time
 from abc import ABC, abstractmethod
 from enum import Enum
-from threading import RLock, Lock
-from typing import Dict, Optional, List, Union, TYPE_CHECKING, Any
+from threading import RLock
+from typing import Dict, Optional, List, Any, TYPE_CHECKING
 
 from src.progress.core.stage import ProgressStage, StageStatus
 
 if TYPE_CHECKING:
-    from src.logging.manager import LoggingManager
+    from src.logging import LoggingManager
 
 logger = logging.getLogger(__name__)
 
@@ -28,26 +27,30 @@ class ProgressMode(Enum):
 
 class ProgressRenderer(ABC):
     """Abstract base class for progress renderers."""
-    
+
     @abstractmethod
     def start(self) -> None:
         """Start the progress display."""
         pass
-    
+
     @abstractmethod
     def stop(self) -> None:
         """Stop the progress display."""
         pass
-    
+
     @abstractmethod
     def update_stage(self, stage_name: str, stage_progress: Any) -> None:
         """Update progress for a specific stage."""
         pass
-    
+
     @abstractmethod
     def is_available(self) -> bool:
         """Check if this renderer is available in the current environment."""
         pass
+
+    def display_completion_summary(self, stats: Dict[str, int]) -> None:
+        """Display completion summary. Default no-op."""
+        return
 
 
 class ProgressTracker:
@@ -61,38 +64,27 @@ class ProgressTracker:
     during progress display.
     """
 
-    def __init__(self, mode: ProgressMode = ProgressMode.AUTO) -> None:
+    def __init__(
+        self,
+        mode: ProgressMode = ProgressMode.AUTO,
+        logging_manager: Optional["LoggingManager"] = None,
+    ) -> None:
         """
         Initialize progress tracker.
         
         Args:
             mode: Progress display mode
+            logging_manager: LoggingManager instance (optional)
         """
         self.mode = mode
         self._lock = RLock()
-        self._renderer_lock = Lock()  # Separate lock for renderer creation
         self._stages: Dict[str, ProgressStage] = {}
         self._renderer: Optional[ProgressRenderer] = None
         self._is_started = False
-        self._renderer_creation_time = 0.0
-        
-        # Logging integration
-        self._logging_manager: Optional['LoggingManager'] = None
-        self._logging_mode_active = False
 
-    def set_logging_manager(self, logging_manager: Optional['LoggingManager']) -> None:
-        """
-        Set the logging manager for progress mode coordination.
-        
-        Args:
-            logging_manager: LoggingManager instance to coordinate with
-        """
-        with self._lock:
-            self._logging_manager = logging_manager
-            
-            # Set up bidirectional reference for integrated error display
-            if logging_manager:
-                logging_manager.set_progress_tracker(self)
+        # Logging integration (set by main.py after instantiation)
+        self._logging_manager = logging_manager
+        self._logging_mode_active = False
 
     def add_stage(self, stage: ProgressStage) -> None:
         """
@@ -193,38 +185,21 @@ class ProgressTracker:
         """
         Automatically select the best available renderer with thread safety.
         
-        Uses separate lock to prevent race conditions during renderer creation.
         """
-        # Check if we already have a renderer
-        if self._renderer is not None:
-            return self._renderer
-            
-        # Use separate lock for renderer selection to avoid deadlocks
-        with self._renderer_lock:
-            # Double-check pattern
+        with self._lock:
             if self._renderer is not None:
                 return self._renderer
-                
-            current_time = time.time()
-            
-            # Avoid repeated expensive renderer selection
-            if current_time - self._renderer_creation_time < 1.0:
-                return None
-                
-            self._renderer_creation_time = current_time
-            
+
             try:
-                # Import and use the config-based auto-selection
                 from src.progress.config import auto_select_renderer
+
                 renderer = auto_select_renderer()
-                
                 if renderer:
                     logger.debug(f"Auto-selected renderer: {type(renderer).__name__}")
                 else:
                     logger.warning("No suitable progress renderer available")
-                
+
                 return renderer
-                
             except Exception as e:
                 logger.error(f"Failed to auto-select renderer: {e}")
                 return None
@@ -265,59 +240,14 @@ class ProgressTracker:
             )
 
     def display_completion_summary(self, stats: Dict[str, int]) -> None:
-        """
-        Display workflow completion summary using Rich formatting when in progress mode.
-        
-        Args:
-            stats: Dictionary containing workflow statistics
-        """
-        # Only display Rich summary if we're using Rich renderer and progress mode is active
-        if (self._renderer and 
-            self.mode != ProgressMode.OFF and 
-            self._is_started):
-            
-            # Check if this is a Rich renderer with console attribute
-            if hasattr(self._renderer, 'console'):
-                try:
-                    # Import Rich components
-                    from rich.panel import Panel
-                    from rich.table import Table
-                    from rich.text import Text
-                    
-                    console = getattr(self._renderer, 'console')
-                    
-                    # Create summary content
-                    summary_table = Table.grid(padding=(0, 2))
-                    summary_table.add_column(style="cyan bold")
-                    summary_table.add_column()
-                    
-                    summary_table.add_row("CSV files processed:", f"{stats.get('total_csv_files', 0)}")
-                    summary_table.add_row("Total records:", f"{stats.get('total_records', 0)}")
-                    summary_table.add_row("Total attachments:", f"{stats.get('total_attachments', 0)}")
-                    
-                    # Add success checkmark
-                    success_text = Text("✓ WORKFLOW COMPLETE", style="bold green")
-                    
-                    # Create success panel
-                    panel = Panel(
-                        summary_table,
-                        title=success_text,
-                        border_style="green",
-                        padding=(1, 2)
-                    )
-                    
-                    # Display the panel
-                    console.print()  # Add some space
-                    console.print(panel)
-                    console.print()  # Add trailing space
-                    
-                    logger.debug("Displayed Rich completion summary")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to display Rich completion summary: {e}")
-                    # Fall back to regular logging (but it will be suppressed in progress mode)
+        """Display workflow completion summary via renderer when available."""
+        if self._renderer and self._is_started and self.mode != ProgressMode.OFF:
+            try:
+                self._renderer.display_completion_summary(stats)
+            except Exception as e:
+                logger.warning(f"Failed to display completion summary: {e}")
 
-    def __enter__(self) -> None:
+    def __enter__(self):
         """Context manager entry."""
         self.start()
         return self

@@ -6,7 +6,6 @@ based on CSV metadata file.
 """
 
 import logging
-import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -14,7 +13,7 @@ from src.api.sf_auth import get_sf_auth_info
 from src.api.sf_client import SalesforceClient
 from src.exceptions import SFAuthError, SFAPIError
 from src.query.filters import ParentIdFilter, apply_parent_id_filter, log_filter_summary
-from src.utils import log_section_header, setup_logging
+from src.utils import log_section_header
 
 from .stats import DownloadStats
 from .metadata import read_metadata_csv
@@ -25,6 +24,12 @@ from .filename import (
     detect_filename_collisions,
 )
 
+# Type hints for progress tracking
+try:
+    from src.progress.core.stage import ProgressStage
+except ImportError:
+    ProgressStage = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +38,8 @@ def download_attachments(
     output_dir: Path,
     org_alias: Optional[str] = None,
     chunk_size: int = 8192,
-    filter_config: Optional[ParentIdFilter] = None
+    filter_config: Optional[ParentIdFilter] = None,
+    progress_stage: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
     Main function to download all attachments from metadata CSV.
@@ -107,6 +113,14 @@ def download_attachments(
             logger.info(f"Downloading {stats.total} attachment(s)...")
 
             output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Initialize progress tracking if provided
+            if progress_stage:
+                try:
+                    progress_stage.start_downloads(stats.total)
+                except Exception as e:
+                    logger.warning(f"Failed to initialize progress tracking: {e}")
+                    progress_stage = None
 
             for idx, attachment in enumerate(attachments, 1):
                 attachment_id = attachment['Id']
@@ -155,6 +169,16 @@ def download_attachments(
                     continue
 
                 logger.info(f"[{idx}/{stats.total}] {original_name}")
+                
+                # Update progress if tracking is enabled
+                if progress_stage:
+                    try:
+                        progress_stage.update_download(
+                            completed_files=idx - 1,
+                            current_file=original_name
+                        )
+                    except Exception:
+                        pass  # Don't let progress tracking errors interrupt downloads
 
                 # Check if file already exists
                 if output_path.exists():
@@ -164,7 +188,7 @@ def download_attachments(
 
                 try:
                     # Download with progress indication using configured chunk size
-                    client.download_attachment(attachment_id, output_path, chunk_size=chunk_size)
+                    bytes_downloaded = client.download_attachment(attachment_id, output_path, chunk_size=chunk_size)
                     stats.success += 1
                     logger.info(f"  ✓ Downloaded")
 
@@ -201,72 +225,3 @@ def download_attachments(
         logger.error(f"Unexpected error: {e}")
         raise
 
-
-def main():
-    """
-    Main entry point for the downloader script.
-
-    Parses command-line arguments and orchestrates the attachment
-    download process.
-    """
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description='Download Salesforce attachments from metadata CSV'
-    )
-    parser.add_argument(
-        '--metadata',
-        type=Path,
-        required=True,
-        help='Path to CSV file with attachment metadata'
-    )
-    parser.add_argument(
-        '--output',
-        type=Path,
-        default=Path('./output/files'),
-        help='Directory to save downloaded files (default: ./output/files)'
-    )
-    parser.add_argument(
-        '--org',
-        type=str,
-        help='Salesforce org alias (default: use default org)'
-    )
-    parser.add_argument(
-        '--log-file',
-        type=Path,
-        default=Path('./logs/download.log'),
-        help='Log file path (default: ./logs/download.log)'
-    )
-
-    args = parser.parse_args()
-
-    # Setup logging
-    setup_logging(args.log_file)
-
-    logger.info("Starting Salesforce Attachments Downloader")
-    logger.info(f"Metadata CSV: {args.metadata}")
-    logger.info(f"Output directory: {args.output}")
-    logger.info(f"Org alias: {args.org or 'default'}")
-
-    try:
-        stats = download_attachments(
-            metadata_csv=args.metadata,
-            output_dir=args.output,
-            org_alias=args.org
-        )
-
-        # Exit code based on results
-        if stats['failed'] > 0:
-            logger.warning("Some downloads failed - check errors above")
-            sys.exit(1)
-        else:
-            logger.info("All downloads completed successfully!")
-            sys.exit(0)
-
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        sys.exit(2)
-
-
-if __name__ == '__main__':
-    main()

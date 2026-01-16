@@ -23,7 +23,7 @@ from src.workflows.common import (
 from src.exceptions import SFQueryError, SFAuthError, SFAPIError
 from src.progress.core import ProgressTracker
 from src.progress.stages import CsvProcessingStage, SoqlQueryStage, DownloadStage
-from src.progress.download_wrapper import download_attachments_with_progress
+from src.download.downloader import download_attachments
 
 logger = logging.getLogger(__name__)
 
@@ -208,17 +208,15 @@ def process_csv_records_workflow(
             if download and merged_count > 0:
                 logger.info(f"Downloading {merged_count} attachment(s) to: {csv_files_dir}")
                 
-                # Start download stage
-                download_stage.start_downloads(merged_count)
-
                 try:
-                    download_stats = download_attachments_with_progress(
+                    download_stats = download_attachments(
                         metadata_csv=merged_csv_path,
                         output_dir=csv_files_dir,
-                        progress_stage=download_stage,
                         org_alias=org_alias,
-                        filter_config=None  # No additional filtering needed
+                        filter_config=None,  # No additional filtering needed
+                        progress_stage=download_stage
                     )
+
                     downloaded_count = download_stats['success']
                     skipped_count = download_stats.get('skipped', 0)
 
