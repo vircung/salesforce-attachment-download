@@ -74,7 +74,7 @@ class DownloadStage(WorkflowStage):
         
         # Build message
         message = f"Downloaded {completed_files}/{self.progress.total} files"
-        display_file = self._truncate_filename(current_file) if current_file else None
+        display_file = current_file
         
         # Build details
         details = {}

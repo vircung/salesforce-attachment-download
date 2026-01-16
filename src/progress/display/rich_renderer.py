@@ -256,6 +256,15 @@ class RichProgressRenderer(ProgressRenderer):
             return max(min_width, terminal_width)
         return min_width
 
+    def _truncate_detail_value(self, label: str, value: object, details_width: int) -> object:
+        """Trim long detail values to fit the details column."""
+        if not isinstance(value, str):
+            return value
+        available = max(10, details_width - len(label) - 4)
+        if len(value) <= available:
+            return value
+        return f"{value[:available - 3]}..."
+
     def _create_layout(self):
         """Create the Rich layout for display."""
         panel_width = self._get_panel_width()
@@ -267,7 +276,7 @@ class RichProgressRenderer(ProgressRenderer):
             border_style="blue",
             padding=(1, 2),
             width=panel_width,
-            expand=False
+            expand=True
         )
         
         # Detailed information table
@@ -278,7 +287,7 @@ class RichProgressRenderer(ProgressRenderer):
             border_style="dim",
             padding=(0, 1),
             width=panel_width,
-            expand=False
+            expand=True
         )
         
         # Overall statistics
@@ -289,12 +298,12 @@ class RichProgressRenderer(ProgressRenderer):
             border_style="green",
             padding=(0, 1),
             width=panel_width,
-            expand=False
+            expand=True
         )
         
         # Combine into main table
-        main_table = Table.grid(padding=1)
-        main_table.add_column()
+        main_table = Table.grid(padding=1, expand=True)
+        main_table.add_column(ratio=1)
         main_table.add_row(progress_panel)
         main_table.add_row(details_panel)
         main_table.add_row(stats_panel)
@@ -304,11 +313,15 @@ class RichProgressRenderer(ProgressRenderer):
     def _create_details_table(self, panel_width: int) -> Table:
         """Create detailed information table."""
         table_width = max(80, panel_width - 4)
-        table = Table(show_header=True, header_style="bold", expand=False, width=table_width)
-        table.add_column("Stage", style="cyan", no_wrap=True, width=16)
-        table.add_column("Status", style="white", no_wrap=True, width=9)
-        table.add_column("Progress", style="blue", no_wrap=True, width=16)
-        table.add_column("Details", style="dim", overflow="fold")
+        table = Table(show_header=True, header_style="bold", expand=True, width=table_width)
+        stage_width = 16
+        status_width = 11
+        progress_width = 17
+        table.add_column("Stage", style="cyan", no_wrap=True, width=stage_width)
+        table.add_column("Status", style="white", no_wrap=True, width=status_width)
+        table.add_column("Progress", style="blue", no_wrap=True, width=progress_width)
+        details_width = max(20, table_width - stage_width - status_width - progress_width - 6)
+        table.add_column("Details", style="dim", overflow="fold", width=details_width)
         
         for stage_name, stage_progress in self._stage_data.items():
             # Format progress
@@ -325,10 +338,14 @@ class RichProgressRenderer(ProgressRenderer):
                 from src.progress.utils import get_detail_display_items
 
                 for label, value in get_detail_display_items(stage_name, stage_progress.details):
+                    value = self._truncate_detail_value(label, value, details_width)
                     details_parts.append(f"{label}: {value}")
             
             if stage_progress.error:
                 details_parts.append(f"Error: {stage_progress.error}")
+            
+            if stage_name in ["csv_processing", "soql_query"]:
+                details_parts = details_parts[:1]
             
             details_text = " | ".join(details_parts) if details_parts else "—"
             
@@ -363,6 +380,9 @@ class RichProgressRenderer(ProgressRenderer):
 
         # Format statistics
         stats_parts = [f"Elapsed: {elapsed_formatted}"]
+        download_stage = self._stage_data.get("file_downloads")
+        if download_stage and download_stage.total is not None:
+            stats_parts.append(f"Downloads: {download_stage.current}/{download_stage.total}")
 
         if StageStatus.COMPLETED in status_counts:
             stats_parts.append(f"✅ {status_counts[StageStatus.COMPLETED]} completed")
@@ -380,36 +400,7 @@ class RichProgressRenderer(ProgressRenderer):
 
     def display_completion_summary(self, stats: Dict[str, int]) -> None:
         """Display workflow completion summary panel."""
-        with self._lock:
-            try:
-                panel_width = self._get_panel_width()
-                summary_table = Table.grid(padding=(0, 2))
-                summary_table.add_column(style="cyan bold")
-                summary_table.add_column()
-
-                summary_table.add_row("CSV files processed:", f"{stats.get('total_csv_files', 0)}")
-                summary_table.add_row("Total records:", f"{stats.get('total_records', 0)}")
-                summary_table.add_row(
-                    "Total attachments:",
-                    f"{stats.get('total_attachments', 0)}",
-                )
-
-                success_text = Text("✓ WORKFLOW COMPLETE", style="bold green")
-                panel = Panel(
-                    summary_table,
-                    title=success_text,
-                    border_style="green",
-                    padding=(1, 2),
-                    width=panel_width,
-                    expand=False
-                )
-
-                self.console.print()
-                self.console.print(panel)
-                self.console.print()
-                logger.debug("Displayed Rich completion summary")
-            except Exception as e:
-                logger.warning(f"Failed to display Rich completion summary: {e}")
+        return
 
 
 # Utility function to check Rich availability
