@@ -5,6 +5,7 @@ Main progress tracker class that coordinates multiple stages and renderers.
 """
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from threading import RLock
@@ -81,6 +82,7 @@ class ProgressTracker:
         self._stages: Dict[str, ProgressStage] = {}
         self._renderer: Optional[ProgressRenderer] = None
         self._is_started = False
+        self._last_update_times: Dict[str, float] = {}
 
         # Logging integration (set by main.py after instantiation)
         self._logging_manager = logging_manager
@@ -176,6 +178,21 @@ class ProgressTracker:
         """Callback for stage updates with error handling."""
         if self._renderer and self._is_started and self.mode != ProgressMode.OFF:
             try:
+                from src.progress.config import get_config
+
+                config = get_config()
+                now = time.time()
+                last_update = self._last_update_times.get(stage_name, 0.0)
+
+                if stage_progress.status in (StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.SKIPPED):
+                    self._last_update_times[stage_name] = now
+                elif stage_progress.error:
+                    self._last_update_times[stage_name] = now
+                elif now - last_update < config.min_update_interval:
+                    return
+                else:
+                    self._last_update_times[stage_name] = now
+
                 self._renderer.update_stage(stage_name, stage_progress)
             except Exception as e:
                 # Log but don't let rendering errors affect progress

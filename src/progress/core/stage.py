@@ -25,7 +25,12 @@ class StageStatus(Enum):
 
 @dataclass
 class StageProgress:
-    """Data structure for stage progress information."""
+    """Data structure for stage progress information.
+
+    current: Units completed (monotonic per stage run).
+    total: Total units expected for the stage (optional).
+    details: Structured metadata for renderers (not progress math).
+    """
     current: int = 0
     total: Optional[int] = None
     status: StageStatus = StageStatus.PENDING

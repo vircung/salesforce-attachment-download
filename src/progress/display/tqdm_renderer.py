@@ -194,13 +194,14 @@ class TqdmProgressRenderer(ProgressRenderer):
         
         # Add key details in a compact format
         if stage_progress.details:
+            from src.progress.utils import get_detail_display_items
+
             details_parts = []
-            for key, value in stage_progress.details.items():
-                if key in ['current_file', 'current_csv', 'current_batch', 'csv_name'] and value:
-                    # Shorten file names for display
-                    if isinstance(value, str) and len(value) > 20:
-                        value = "..." + value[-17:]
-                    details_parts.append(f"{key.split('_')[-1]}: {value}")
+            for label, value in get_detail_display_items(stage_name, stage_progress.details):
+                # Shorten file names for display
+                if isinstance(value, str) and len(value) > 20:
+                    value = "..." + value[-17:]
+                details_parts.append(f"{label}: {value}")
             
             if details_parts:
                 base_desc += f" ({', '.join(details_parts[:2])})"  # Limit to 2 details

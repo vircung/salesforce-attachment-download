@@ -13,7 +13,7 @@ SOQL_STAGE_CONFIG = StageConfig(
     name="soql_query",
     description="Executing SOQL queries for attachments",
     message_template="Batch {current_batch}/{total} - Found {total_attachments} attachments",
-    details_fields=["current_batch", "batch_size", "batch_records", "total_attachments", "csv_name"]
+    details_fields=["current_csv", "current_batch", "batch_size", "batch_records", "total_attachments"]
 )
 
 
@@ -35,7 +35,7 @@ class SoqlQueryStage(WorkflowStage):
         )
         
         if csv_name:
-            self.update_progress(details={"csv_name": csv_name})
+            self.update_progress(details={"current_csv": csv_name})
 
     def update_batch(
         self,
@@ -105,7 +105,6 @@ class SoqlQueryStage(WorkflowStage):
                 details["total_attachments"] = total_attachments
             
             self.update_progress(
-                current=batch_num if batch_num is not None else self.progress.current,
                 message=message,
                 details=details if details else None
             )
