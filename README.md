@@ -12,7 +12,7 @@ A Python CLI tool for downloading Salesforce Attachment records and files using 
 - Export metadata to CSV
 - Download attachment files via REST API
 - Reuse sf CLI authentication (no separate OAuth)
-- Progress indicators and logging
+- Rich progress display with auto-detected renderer (Rich or tqdm)
 - Error handling for common failures
 - Flexible configuration via CLI arguments or .env file
 - Intelligent filename collision detection using ParentId prefix
@@ -43,6 +43,10 @@ A Python CLI tool for downloading Salesforce Attachment records and files using 
    pip install -r requirements.txt
    ```
 
+3. Optional: progress UI dependencies (already in `requirements.txt`)
+   - `rich` for the rich terminal progress view
+   - `tqdm` as a fallback renderer
+
 ## Usage
 
 ### Quick Start (CSV Workflow)
@@ -61,6 +65,9 @@ python main.py --org your-org --records-dir ./records --output ./output
 **Optional arguments:**
 - `--output`: Base output directory (default: `./output`)
 - `--batch-size`: Number of ParentIds per SOQL query batch (default: 100)
+- `--progress`: Progress display mode (`auto`, `on`, `off`)
+- `--verbose`: Alias for default INFO logging
+- `--debug`: Enable DEBUG console logging
 
 ### CSV File Requirements
 
@@ -106,19 +113,18 @@ python main.py --org your-org --records-dir ./records --output ./output
 
 ```
 output/
-├── metadata/
-│   ├── csv_name_1_batch_1_20260114_120000.csv
-│   ├── csv_name_1_batch_2_20260114_120030.csv
-│   └── csv_name_2_batch_1_20260114_120100.csv
-└── files/
-    ├── csv_name_1/
-    │   ├── a3xAAA111_invoice.pdf
-    │   ├── a3xAAA111_receipt.pdf
-    │   └── a3xAAA222_contract.pdf
-    └── csv_name_2/
-        ├── 001BBB333_report.xlsx
-        └── 001BBB444_document.docx
+└── csv_name_1/
+    ├── metadata/
+    │   └── attachments_20260114_120000_merged.csv
+    └── files/
+        ├── a3xAAA111_invoice.pdf
+        ├── a3xAAA111_receipt.pdf
+        └── a3xAAA222_contract.pdf
 ```
+
+Each CSV file gets its own subfolder containing:
+- `metadata/` with merged query results
+- `files/` with downloaded attachment binaries
 
 **Filename Convention:**
 - Default format: `{ParentId}_{original_filename}`
@@ -165,6 +171,9 @@ The tool supports loading configuration from a `.env` file in the project root d
    # Console logging configuration
    VERBOSE=false
    DEBUG=false
+
+   # Progress display configuration
+   PROGRESS=auto
    ```
 
 3. **IMPORTANT**: Never commit the `.env` file to version control!
@@ -181,6 +190,7 @@ The tool supports loading configuration from a `.env` file in the project root d
 | `BATCH_SIZE` | Number of ParentIds per query batch | `100` | `--batch-size` |
 | `VERBOSE` | Enable verbose console output (INFO level) | `false` | `--verbose` |
 | `DEBUG` | Enable debug console output (DEBUG level) | `false` | `--debug` |
+| `PROGRESS` | Progress display mode: `auto`, `on`, `off` | `auto` | `--progress` |
 
 **Configuration Precedence:**
 
@@ -254,6 +264,22 @@ DEBUG=false    # Enable DEBUG level with technical details
 --debug        # Enable debug output (DEBUG level)
 ```
 
+### Progress Display
+
+The progress UI auto-selects a renderer (prefers `rich`, falls back to `tqdm`). You can force or disable it.
+
+**Via .env file:**
+```bash
+PROGRESS=auto  # auto, on, off
+```
+
+**Via CLI flags:**
+```bash
+--progress auto
+--progress on
+--progress off
+```
+
 ### Log Output
 
 Logs are written to:
@@ -308,6 +334,7 @@ Failed downloads are logged but don't stop the process.
 --records-dir       Directory containing CSV files with record IDs (REQUIRED)
 --output            Base output directory (default: ./output)
 --batch-size        Number of ParentIds per SOQL query batch (default: 100)
+--progress          Progress display mode: auto, on, off
 --verbose           Enable verbose console output (INFO level)
 --debug             Enable debug console output (DEBUG level with technical details)
 ```
@@ -319,6 +346,7 @@ Failed downloads are logged but don't stop the process.
 - Basic error handling without exponential backoff
 - Support limited to Attachment object (ContentDocument not yet supported)
 - Batch size constrained by SOQL WHERE clause character limits
+- Progress display requires `rich` or `tqdm` (falls back to basic logging if unavailable)
 
 ## Troubleshooting
 
