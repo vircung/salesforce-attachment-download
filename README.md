@@ -455,8 +455,16 @@ attachments-extract/
 │   ├── exceptions.py           # Custom exceptions
 │   ├── utils.py                # Logging utilities
 │   ├── workflows/
+│   │   ├── __init__.py         # Package exports
+│   │   ├── orchestrator.py     # Three-phase workflow orchestration (main entry point)
+│   │   ├── csv_coordinator.py  # Phase 1: CSV discovery & processing
+│   │   ├── query_coordinator.py # Phase 2: SOQL batch querying
+│   │   ├── download_coordinator.py # Phase 3: File downloads
+│   │   ├── error_handler.py    # Centralized error handling
+│   │   ├── statistics.py       # Statistics aggregation
+│   │   ├── directory_manager.py # Directory structure management
 │   │   ├── common.py           # Shared workflow utilities
-│   │   └── csv_records.py      # CSV workflow orchestration
+│   │   └── processor.py        # Legacy workflow (kept as backup)
 │   ├── csv/
 │   │   ├── processor.py        # CSV file processing
 │   │   └── validator.py        # CSV validation

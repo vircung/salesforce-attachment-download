@@ -21,7 +21,14 @@ sf org login web --alias <org>                          # Auth prerequisite
 ```
 main.py                    # Entry point
 src/
-  workflows/csv_records.py # Main workflow (reference for patterns)
+  workflows/
+    orchestrator.py        # Three-phase workflow orchestration
+    csv_coordinator.py     # Phase 1: CSV discovery
+    query_coordinator.py   # Phase 2: SOQL querying
+    download_coordinator.py # Phase 3: Downloads
+    error_handler.py       # Error management
+    statistics.py          # Stats tracking
+    directory_manager.py   # Directory management
   csv/                     # CSV processing
   query/                   # SOQL execution via sf CLI
   download/                # REST API file downloads

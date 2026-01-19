@@ -25,7 +25,7 @@ from src.download.filename import FilenameInfo, sanitize_filename, detect_filena
 from src.download.metadata import read_metadata_csv
 
 # Workflows
-from src.workflows.csv_records import process_csv_records_workflow
+from src.workflows.orchestrator import process
 
 # CLI
 from src.cli.config import parse_arguments
@@ -63,7 +63,7 @@ __all__ = [
     "detect_filename_collisions",
     "read_metadata_csv",
     # Workflows
-    "process_csv_records_workflow",
+    "process",
     # CLI
     "parse_arguments",
     # Utils

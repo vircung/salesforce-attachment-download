@@ -11,7 +11,7 @@ import sys
 import logging
 
 from src.cli.config import parse_arguments
-from src.workflows.csv_records import process_csv_records_workflow
+from src.workflows.orchestrator import process
 from src.logging import LoggingManager
 from src.progress import ProgressTracker
 from src.progress.core import ProgressMode
@@ -55,7 +55,7 @@ def main():
             logger.info("=" * 70)
             
             # Execute CSV-based workflow
-            stats = process_csv_records_workflow(
+            stats = process(
                 org_alias=args.org,
                 output_dir=args.output,
                 records_dir=args.records_dir_resolved,
