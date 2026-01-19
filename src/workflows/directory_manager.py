@@ -58,11 +58,6 @@ def create_csv_directories(
     # Use ensure_directories() from src.workflows.common
     ensure_directories(csv_output_dir, metadata_dir, files_dir)
 
-    # Log directory creation
-    logger.info(f"Output directories:")
-    logger.info(f"  Metadata: {metadata_dir}")
-    logger.info(f"  Files: {files_dir}")
-
     # Return CsvDirectories with all three paths
     return CsvDirectories(
         csv_output_dir=csv_output_dir,

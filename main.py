@@ -12,6 +12,7 @@ import logging
 
 from src.cli.config import parse_arguments
 from src.workflows.orchestrator import process
+from src.workflows.exception_handler import WorkflowExceptionHandler
 from src.logging import LoggingManager
 from src.progress import ProgressTracker
 from src.progress.core import ProgressMode
@@ -90,22 +91,13 @@ def main():
         return 0
 
     except FileNotFoundError as e:
-        logger.error(f"File or directory not found: {e}")
-        logger.error("Please check that all required files and directories exist")
-        logger.debug("Full error details:", exc_info=True)
-        return 2
+        return WorkflowExceptionHandler.handle_and_log(e, "Configuration error")
     
     except PermissionError as e:
-        logger.error(f"Permission denied: {e}")
-        logger.error("Please check file and directory permissions")
-        logger.debug("Full error details:", exc_info=True)
-        return 2
+        return WorkflowExceptionHandler.handle_and_log(e, "Access error")
     
     except ValueError as e:
-        logger.error(f"Invalid configuration or data: {e}")
-        logger.error("Please check your CSV files and configuration settings")
-        logger.debug("Full error details:", exc_info=True)
-        return 2
+        return WorkflowExceptionHandler.handle_and_log(e, "Configuration error")
     
     except KeyboardInterrupt:
         logger.warning("\nWorkflow interrupted by user (Ctrl+C)")

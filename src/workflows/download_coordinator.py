@@ -15,6 +15,7 @@ from src.progress.stages import DownloadStage
 from src.utils import log_section_header
 from src.exceptions import SFAuthError, SFAPIError, SFNetworkError
 from src.workflows.thread_pool import WorkflowThreadPool
+from src.constants import WorkflowPhase
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ def coordinate_all_downloads(
         SFAuthError: If authentication fails
         SFAPIError: If API error occurs
     """
-    log_section_header("PHASE 3: DOWNLOAD ATTACHMENTS")
+    log_section_header(WorkflowPhase.DOWNLOADS)
     
     download_results = []
     

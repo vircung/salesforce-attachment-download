@@ -16,6 +16,8 @@ from src.progress.core import ProgressTracker
 from src.progress.stages import CsvProcessingStage, SoqlQueryStage, DownloadStage
 from src.progress.core.stage import StageStatus
 from src.exceptions import SFAuthError, SFQueryError, SFAPIError
+from src.workflows.exception_handler import WorkflowExceptionHandler
+from src.constants import WorkflowPhase
 
 # Coordinators
 from src.workflows.csv_coordinator import coordinate_csv_processing
@@ -24,12 +26,6 @@ from src.workflows.download_coordinator import coordinate_all_downloads, Downloa
 
 # Support modules
 from src.workflows.directory_manager import create_csv_directories
-from src.workflows.statistics import (
-    WorkflowStatistics,
-    create_statistics,
-    update_csv_statistics,
-    log_workflow_summary
-)
 from src.workflows.error_handler import WorkflowErrorHandler
 
 # Thread pool support
@@ -124,7 +120,7 @@ def process(
         # ============================================================
         # PHASE 1: CSV PROCESSING
         # ============================================================
-        log_section_header("PHASE 1: CSV DISCOVERY & PROCESSING")
+        log_section_header(WorkflowPhase.CSV_PROCESSING)
         try:
             csv_records = coordinate_csv_processing(
                 records_dir=records_dir,
@@ -148,7 +144,7 @@ def process(
         # ============================================================
         # PHASE 2: SOQL QUERYING (ALL CSVs)
         # ============================================================
-        log_section_header("PHASE 2: SOQL BATCH QUERYING")
+        log_section_header(WorkflowPhase.SOQL_QUERYING)
         try:
             with thread_pool:
                 query_results = execute_all_csv_queries(
@@ -168,7 +164,7 @@ def process(
                 # ============================================================
                 # PHASE 3: DOWNLOADS (ALL CSVs)
                 # ============================================================
-                log_section_header("PHASE 3: DOWNLOAD ATTACHMENTS")
+                log_section_header(WorkflowPhase.DOWNLOADS)
                 download_results = []
                 download_results = coordinate_all_downloads(
                     query_results=query_results,
@@ -185,58 +181,57 @@ def process(
         # ============================================================
         # FINALIZE & AGGREGATE STATISTICS
         # ============================================================
-        log_section_header("WORKFLOW SUMMARY")
+        log_section_header(WorkflowPhase.SUMMARY)
         
-        # Initialize statistics
-        stats = create_statistics()
-        stats.total_csv_files = len(csv_records)
+        # Build statistics inline
+        csv_dirs = []
+        for csv_info in csv_records:
+            dirs = create_csv_directories(output_dir, csv_info.csv_name)
+            csv_dirs.append(dirs.csv_output_dir)
         
-        # Aggregate per-CSV statistics
-        for csv_info, query_result, download_result in zip(
-            csv_records, query_results, download_results
-        ):
-            csv_dirs = create_csv_directories(output_dir, csv_info.csv_name)
-            
-            update_csv_statistics(
-                stats=stats,
-                csv_name=csv_info.csv_name,
-                csv_records=csv_info.total_records,
-                csv_batches=csv_info.total_batches,
-                attachments_found=query_result.total_attachments_found,
-                attachments_downloaded=download_result.downloaded_count,
-                csv_output_dir=csv_dirs.csv_output_dir
-            )
+        stats = {
+            'total_csv_files': len(csv_records),
+            'total_records': sum(csv_info.total_records for csv_info in csv_records),
+            'total_batches': sum(csv_info.total_batches for csv_info in csv_records),
+            'total_attachments': sum(qr.total_attachments_found for qr in query_results),
+            'per_csv': [
+                {
+                    'csv_name': csv_info.csv_name,
+                    'records': csv_info.total_records,
+                    'batches': csv_info.total_batches,
+                    'attachments': qr.total_attachments_found,
+                    'downloaded': dr.downloaded_count,
+                    'output_dir': str(csv_dir)
+                }
+                for csv_info, qr, dr, csv_dir in zip(csv_records, query_results, download_results, csv_dirs)
+            ]
+        }
         
         # Mark stages as complete
         csv_stage.complete(f"Processed {len(csv_records)} CSV files")
-        soql_stage.complete(f"Completed {stats.total_batches} batches")
-        download_stage.complete(f"Downloaded {stats.total_attachments} attachments")
+        soql_stage.complete(f"Completed {stats['total_batches']} batches")
+        download_stage.complete(f"Downloaded {stats['total_attachments']} attachments")
         
         # Log final summary
-        log_workflow_summary(stats)
+        log_section_header(WorkflowPhase.SUMMARY)
+        logger.info(f"Total CSV files: {stats['total_csv_files']}")
+        logger.info(f"Total records: {stats['total_records']}")
+        logger.info(f"Total batches executed: {stats['total_batches']}")
+        logger.info(f"Total attachments found: {stats['total_attachments']}")
         
         # Return statistics as dictionary
-        return {
-            'total_csv_files': stats.total_csv_files,
-            'total_records': stats.total_records,
-            'total_batches': stats.total_batches,
-            'total_attachments': stats.total_attachments,
-            'per_csv': [asdict(csv_stat) for csv_stat in stats.per_csv]
-        }
+        return stats
     
     except SFAuthError as e:
-        logger.error(f"Salesforce authentication failed: {e}")
-        logger.error("Please check your Salesforce CLI authentication (run: sf org list)")
+        WorkflowExceptionHandler.handle_and_log(e)
         raise
     
     except SFQueryError as e:
-        logger.error(f"SOQL query failed: {e}")
-        logger.error("Check query syntax and record IDs")
+        WorkflowExceptionHandler.handle_and_log(e)
         raise
     
     except SFAPIError as e:
-        logger.error(f"Salesforce API error: {e}")
-        logger.error("Check network connection and API access")
+        WorkflowExceptionHandler.handle_and_log(e)
         raise
     
     except Exception as e:

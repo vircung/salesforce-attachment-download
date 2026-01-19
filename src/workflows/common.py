@@ -34,7 +34,6 @@ def ensure_directories(*dirs: Path) -> None:
     """
     for directory in dirs:
         directory.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"Directory ensured: {directory}")
 
 
 def merge_csv_files(

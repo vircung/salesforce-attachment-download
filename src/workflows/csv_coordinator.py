@@ -8,7 +8,8 @@ Responsible for discovering all CSV files and preparing them for querying.
 import logging
 from pathlib import Path
 from typing import List, Optional
-from src.csv.processor import process_records_directory, CsvRecordInfo
+from src.constants import CsvRecordInfo, WorkflowPhase
+from src.csv.utils import process_records_directory
 from src.progress.stages import CsvProcessingStage
 from src.progress.core import ProgressTracker
 from src.utils import log_section_header
@@ -48,7 +49,7 @@ def coordinate_csv_processing(
         FileNotFoundError: If records_dir doesn't exist
         ValueError: If no CSV files found or missing 'Id' column
     """
-    log_section_header("PHASE 1: CSV DISCOVERY & PROCESSING")
+    log_section_header(WorkflowPhase.CSV_PROCESSING)
     logger.info("Starting CSV discovery...")
 
     # Start discovery stage

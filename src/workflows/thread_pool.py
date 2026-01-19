@@ -127,7 +127,6 @@ class WorkflowThreadPool:
         task_id: str,
         fn: Callable[..., Any],
         args: tuple,
-        retry_count: int = 0,
     ) -> None:
         """Submit a task for execution.
 
@@ -135,7 +134,6 @@ class WorkflowThreadPool:
             task_id: Unique task identifier
             fn: Callable to execute
             args: Arguments to pass to the callable
-            retry_count: Unused parameter (for compatibility)
         """
         future = self.executor.submit(
             self._execute_with_retries, task_id, fn, args, 3

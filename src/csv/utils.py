@@ -1,46 +1,42 @@
 """
-CSV Records Processor Module
+CSV Utilities Module
 
-Handles CSV file discovery, validation, ID extraction, and batching
-for CSV-based attachment extraction workflow.
+Provides utility functions for CSV file processing, validation, and data extraction.
 """
 
 import csv
 import logging
-from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class CsvRecordInfo:
-    """
-    Information about a CSV file and its records.
+def read_csv_rows(csv_path: Path) -> List[Dict[str, str]]:
+    """Read all rows from CSV file."""
+    with csv_path.open('r', encoding='utf-8') as f:
+        return list(csv.DictReader(f))
 
-    Attributes:
-        csv_path: Path to the CSV file
-        csv_name: Filename without extension (used for output directory)
-        record_ids: List of extracted record IDs
-        total_records: Total number of valid record IDs found
-        id_batches: List of ID batches (each batch contains up to batch_size IDs)
-        total_batches: Number of batches created
-    """
-    csv_path: Path
-    csv_name: str
-    record_ids: List[str]
-    total_records: int
-    id_batches: List[List[str]]
-    total_batches: int
 
-    def __str__(self) -> str:
-        """String representation for logging."""
-        return (
-            f"CsvRecordInfo(csv_name='{self.csv_name}', "
-            f"total_records={self.total_records}, "
-            f"total_batches={self.total_batches})"
-        )
+def count_csv_rows(csv_path: Path) -> int:
+    """Count data rows in CSV (excluding header)."""
+    with csv_path.open('r', encoding='utf-8') as f:
+        return sum(1 for _ in csv.DictReader(f))
+
+
+def extract_column(csv_path: Path, column: str, unique: bool = True) -> List[str]:
+    """Extract values from specific column."""
+    rows = read_csv_rows(csv_path)
+    values = [row.get(column, '').strip() for row in rows if row.get(column, '').strip()]
+    if unique:
+        seen = set()
+        unique_values = []
+        for v in values:
+            if v not in seen:
+                seen.add(v)
+                unique_values.append(v)
+        return unique_values
+    return values
 
 
 def discover_csv_files(records_dir: Path) -> List[Path]:
@@ -238,7 +234,7 @@ def batch_ids(ids: List[str], batch_size: int) -> List[List[str]]:
 def prepare_csv_record_info(
     csv_path: Path,
     batch_size: int = 100
-) -> CsvRecordInfo:
+):
     """
     Prepare complete CSV record information including batching.
 
@@ -256,6 +252,8 @@ def prepare_csv_record_info(
         FileNotFoundError: If CSV file doesn't exist
         ValueError: If CSV structure is invalid or batch_size < 1
     """
+    from src.constants import CsvRecordInfo  # Import here to avoid circular import
+
     logger.debug(f"Processing CSV file: {csv_path.name}")
 
     # Extract IDs
@@ -285,7 +283,7 @@ def prepare_csv_record_info(
 def process_records_directory(
     records_dir: Path,
     batch_size: int = 100
-) -> List[CsvRecordInfo]:
+):
     """
     Process all CSV files in directory and prepare for querying.
 
@@ -302,6 +300,8 @@ def process_records_directory(
         FileNotFoundError: If directory doesn't exist
         ValueError: If no CSV files found or any CSV is invalid
     """
+    from src.constants import CsvRecordInfo  # Import here to avoid circular import
+
     logger.debug("=" * 60)
     logger.debug("CSV RECORDS PROCESSING")
     logger.debug("=" * 60)

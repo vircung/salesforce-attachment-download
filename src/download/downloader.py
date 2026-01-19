@@ -16,6 +16,7 @@ from src.api.sf_client import SalesforceClient
 from src.exceptions import SFAuthError, SFAPIError, SFNetworkError
 from src.query.filters import ParentIdFilter, apply_parent_id_filter, log_filter_summary
 
+from src.workflows.common import ensure_directories
 from .stats import DownloadStats
 from .metadata import read_metadata_csv
 from .filename import (
@@ -138,8 +139,7 @@ def download_attachments(
     output_dir: Path,
     org_alias: Optional[str] = None,
     filter_config: Optional[ParentIdFilter] = None,
-    progress_stage: Optional[Any] = None,
-    batch_size: int = 100  # Deprecated, kept for backward compatibility
+    progress_stage: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
     Main function to download all attachments from metadata CSV.
@@ -152,7 +152,6 @@ def download_attachments(
         progress_stage: Optional progress tracking stage.
                If provided, MUST be pre-initialized by caller with start_downloads().
                This function only updates progress, does not initialize it.
-        batch_size: Deprecated parameter, kept for backward compatibility (ignored)
 
     Returns:
         Dictionary with summary statistics including:
@@ -214,11 +213,7 @@ def download_attachments(
 
             # Step 4: Download files
    
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            # Warn about deprecated batch_size
-            if batch_size != 100:
-                logger.warning(f"batch_size parameter is deprecated and ignored.")
+            ensure_directories(output_dir)
 
             # Early exit if no attachments
             if stats.total == 0:

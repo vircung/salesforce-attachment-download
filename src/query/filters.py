@@ -40,7 +40,7 @@ class ParentIdFilter:
         # Validate prefixes
         for prefix in self.prefixes:
             if not SALESFORCE_PREFIX_PATTERN.match(prefix):
-                logger.warning(
+                raise ValueError(
                     f"Invalid Salesforce ID prefix format: '{prefix}'. "
                     f"Expected 3 alphanumeric characters."
                 )
@@ -48,7 +48,7 @@ class ParentIdFilter:
         # Validate exact IDs
         for sf_id in self.exact_ids:
             if not SALESFORCE_ID_PATTERN.match(sf_id):
-                logger.warning(
+                raise ValueError(
                     f"Invalid Salesforce ID format: '{sf_id}'. "
                     f"Expected 15 or 18 alphanumeric characters."
                 )

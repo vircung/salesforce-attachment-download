@@ -15,7 +15,8 @@ from src.query.executor import run_query_script_with_filter
 from src.query.soql import execute_soql_query, query_attachments_with_filter, build_attachment_query
 
 # CSV
-from src.csv.processor import CsvRecordInfo, process_records_directory
+from src.constants import CsvRecordInfo
+from src.csv.utils import process_records_directory
 from src.csv.validator import validate_metadata_csv
 
 # Download
