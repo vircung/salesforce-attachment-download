@@ -83,6 +83,40 @@ class CsvProcessingStage(WorkflowStage):
             details={"last_file": filename, "total_records": total_records}
         )
 
+    def estimate_total_files(self, records_dir: Path) -> int:
+        """
+        Quick estimate of total CSV files in directory.
+        
+        Scans directory for .csv files (no subdirectories) to get
+        initial total estimate. Called before full discovery starts.
+        
+        Args:
+            records_dir: Directory containing CSV files
+            
+        Returns:
+            Count of .csv files found, or 0 if error
+        """
+        try:
+            csv_files = list(records_dir.glob("*.csv"))
+            return len(csv_files)
+        except Exception:
+            return 0  # Fallback: return 0 if scan fails
+
+    def set_processing_total(self, estimated_files: int) -> None:
+        """
+        Pre-populate processing total with initial estimate.
+        
+        Starts the processing stage with estimated file count
+        so progress is visible from the start.
+        
+        Args:
+            estimated_files: Estimated number of CSV files
+        """
+        self.start(
+            total=estimated_files,
+            message="Processing CSV files"
+        )
+
     def get_display_info(self) -> Dict[str, Any]:
         """Get CSV-specific information for display."""
         return super().get_display_info()

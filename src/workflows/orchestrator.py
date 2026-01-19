@@ -125,6 +125,15 @@ def process(
                 csv_stage=csv_stage,
                 progress_tracker=progress_tracker
             )
+            
+            # Pre-populate SOQL stage total for Phase 2
+            total_batches = sum(csv_info.total_batches for csv_info in csv_records)
+            if total_batches > 0 and soql_stage:
+                soql_stage.set_total(total_batches)
+                logger.debug(f"Pre-populated SOQL stage total: {total_batches} batches")
+            
+            # Mark CSV stage as completed after Phase 1
+            csv_stage.complete(f"Processed {len(csv_records)} CSV files")
         except Exception as e:
             error_handler.handle_csv_error("csv_discovery", e)
             raise
@@ -141,6 +150,12 @@ def process(
                 soql_stage=soql_stage,
                 batch_size=batch_size
             )
+            
+            # Pre-populate Download stage total for Phase 3
+            total_attachments = sum(qr.total_attachments_found for qr in query_results)
+            if total_attachments > 0 and download_stage:
+                download_stage.set_total(total_attachments)
+                logger.debug(f"Pre-populated Download stage total: {total_attachments} attachments")
         except Exception as e:
             error_handler.handle_query_error("all_queries", e)
             raise

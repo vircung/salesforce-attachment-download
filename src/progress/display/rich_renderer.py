@@ -61,11 +61,14 @@ class RichProgressRenderer(ProgressRenderer):
         self._stage_data: Dict[str, StageProgress] = {}
         self._start_time = time.time()
         
-        # Update debouncing for performance
+        # Update debouncing for performance - SOQL phase needs longer debounce
         self._last_update_time = 0.0
         self._pending_updates: Dict[str, StageProgress] = {}
         self._layout_cache: Optional[object] = None
         self._layout_cache_time = 0.0
+        # Cache for details table to avoid recomputation
+        self._details_cache: Dict[str, str] = {}
+        self._details_cache_time = 0.0
 
     def is_available(self) -> bool:
         """Check if Rich is available."""
@@ -74,6 +77,34 @@ class RichProgressRenderer(ProgressRenderer):
             return True
         except ImportError:
             return False
+
+    def _initialize_stages(self) -> None:
+        """
+        Initialize all workflow stages with PENDING status.
+        
+        Called when renderer starts to ensure all stages visible
+        immediately with consistent initial state. Stages are:
+        - csv_processing
+        - soql_query
+        - file_downloads
+        """
+        stage_names = ["csv_processing", "soql_query", "file_downloads"]
+        
+        for stage_name in stage_names:
+            if stage_name not in self._stage_data:
+                # Create initial progress snapshot
+                initial_progress = StageProgress(
+                    current=0,
+                    total=None,  # Will be set when phase starts
+                    status=StageStatus.PENDING,
+                    message="",
+                    details={},
+                    error=None
+                )
+                # Add to stage data so it appears in table
+                self._stage_data[stage_name] = initial_progress
+                # Create task for progress bar
+                self._create_task(stage_name, initial_progress)
 
     def start(self) -> None:
         """Start the Rich progress display."""
@@ -96,6 +127,11 @@ class RichProgressRenderer(ProgressRenderer):
                 transient=False
             )
             self._live.start()
+            
+            # Initialize all stages for visibility
+            self._initialize_stages()
+            # Force initial render with all stages visible
+            self._update_live_display()
 
     def stop(self) -> None:
         """Stop the Rich progress display."""
@@ -115,6 +151,7 @@ class RichProgressRenderer(ProgressRenderer):
                 self._live = None
                 # Clear caches
                 self._layout_cache = None
+                self._details_cache.clear()
                 self._pending_updates.clear()
 
     def update_stage(self, stage_name: str, stage_progress: StageProgress) -> None:
@@ -130,8 +167,14 @@ class RichProgressRenderer(ProgressRenderer):
                 self._pending_updates[stage_name] = stage_progress
                 current_time = time.time()
                 
+                # Use longer debounce interval for SOQL phase to reduce update frequency
+                debounce_interval = config.debounce_interval
+                if stage_name == "soql_query":
+                    debounce_interval = max(debounce_interval, 0.2)  # 200ms minimum for SOQL
+                
                 # Only update if enough time has passed
-                if current_time - self._last_update_time < config.debounce_interval:
+                time_diff = current_time - self._last_update_time
+                if time_diff < debounce_interval:
                     return
                 
                 self._last_update_time = current_time
@@ -165,10 +208,26 @@ class RichProgressRenderer(ProgressRenderer):
         
         current_time = time.time()
         
-        # Use cached layout if available and recent
-        if (self._layout_cache is not None and 
-            current_time - self._layout_cache_time < (1.0 / config.rich_refresh_rate)):
-            return
+        # Check if we need to update based on time and data changes
+        cache_valid = (
+            self._layout_cache is not None and 
+            current_time - self._layout_cache_time < (1.0 / config.rich_refresh_rate)
+        )
+        
+        # For SOQL phase, be more aggressive with caching to reduce updates
+        if cache_valid:
+            # Additional check: see if any stage data has actually changed
+            # This prevents unnecessary updates when data is the same
+            data_changed = False
+            for stage_name, stage_progress in self._stage_data.items():
+                cached_details = self._details_cache.get(stage_name)
+                current_details = self._get_details_text(stage_name, stage_progress)
+                if cached_details != current_details:
+                    data_changed = True
+                    break
+            
+            if not data_changed:
+                return
         
         # Create new layout and cache it
         layout = self._create_layout()
@@ -265,6 +324,35 @@ class RichProgressRenderer(ProgressRenderer):
             return value
         return f"{value[:available - 3]}..."
 
+    def _get_details_text(self, stage_name: str, stage_progress: StageProgress) -> str:
+        """Get formatted details text for a stage (used for caching)."""
+        details_width = 40  # Approximate width for caching comparison
+        
+        # Format details based on status
+        if stage_progress.status == StageStatus.PENDING:
+            return "Waiting to start..."
+        elif stage_progress.status == StageStatus.SKIPPED:
+            return "Skipped"
+        elif stage_progress.status == StageStatus.FAILED:
+            return f"Failed: {stage_progress.error}" if stage_progress.error else "Failed"
+        else:
+            # RUNNING or COMPLETED: show actual details
+            details_parts = []
+            if stage_progress.details:
+                from src.progress.utils import get_detail_display_items
+
+                for label, value in get_detail_display_items(stage_name, stage_progress.details):
+                    value = self._truncate_detail_value(label, value, details_width)
+                    details_parts.append(f"{label}: {value}")
+            
+            if stage_progress.error:
+                details_parts.append(f"Error: {stage_progress.error}")
+            
+            if stage_name in ["csv_processing", "soql_query"]:
+                details_parts = details_parts[:1]
+            
+            return " | ".join(details_parts) if details_parts else "—"
+
     def _create_layout(self):
         """Create the Rich layout for display."""
         panel_width = self._get_panel_width()
@@ -325,29 +413,40 @@ class RichProgressRenderer(ProgressRenderer):
         
         for stage_name, stage_progress in self._stage_data.items():
             # Format progress
-            if stage_progress.total:
+            if stage_progress.status == StageStatus.PENDING:
+                # For pending stages, show waiting indicator
+                progress_text = "Waiting"
+            elif stage_progress.total:
                 progress_text = f"{stage_progress.current}/{stage_progress.total}"
                 percentage = (stage_progress.current / stage_progress.total) * 100
                 progress_text += f" ({percentage:.1f}%)"
             else:
                 progress_text = str(stage_progress.current) if stage_progress.current else "—"
             
-            # Format details
-            details_parts = []
-            if stage_progress.details:
-                from src.progress.utils import get_detail_display_items
+            # Format details based on status
+            if stage_progress.status == StageStatus.PENDING:
+                details_text = "Waiting to start..."
+            elif stage_progress.status == StageStatus.SKIPPED:
+                details_text = "Skipped"
+            elif stage_progress.status == StageStatus.FAILED:
+                details_text = f"Failed: {stage_progress.error}" if stage_progress.error else "Failed"
+            else:
+                # RUNNING or COMPLETED: show actual details
+                details_parts = []
+                if stage_progress.details:
+                    from src.progress.utils import get_detail_display_items
 
-                for label, value in get_detail_display_items(stage_name, stage_progress.details):
-                    value = self._truncate_detail_value(label, value, details_width)
-                    details_parts.append(f"{label}: {value}")
-            
-            if stage_progress.error:
-                details_parts.append(f"Error: {stage_progress.error}")
-            
-            if stage_name in ["csv_processing", "soql_query"]:
-                details_parts = details_parts[:1]
-            
-            details_text = " | ".join(details_parts) if details_parts else "—"
+                    for label, value in get_detail_display_items(stage_name, stage_progress.details):
+                        value = self._truncate_detail_value(label, value, details_width)
+                        details_parts.append(f"{label}: {value}")
+                
+                if stage_progress.error:
+                    details_parts.append(f"Error: {stage_progress.error}")
+                
+                if stage_name in ["csv_processing", "soql_query"]:
+                    details_parts = details_parts[:1]
+                
+                details_text = " | ".join(details_parts) if details_parts else "—"
             
             # Add row with color coding
             status_color = {

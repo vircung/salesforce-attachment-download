@@ -54,6 +54,12 @@ def coordinate_csv_processing(
     # Start discovery stage
     csv_stage.start_discovery(records_dir)
     
+    # Quick scan for initial estimate before full discovery
+    estimated_files = csv_stage.estimate_total_files(records_dir)
+    if estimated_files > 0:
+        csv_stage.set_processing_total(estimated_files)
+        logger.debug(f"Pre-populated CSV stage total: {estimated_files} files estimated")
+    
     # Call existing processor to discover and process CSVs
     csv_records = process_records_directory(records_dir, batch_size)
     

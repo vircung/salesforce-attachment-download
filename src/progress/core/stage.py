@@ -189,6 +189,20 @@ class ProgressStage(ABC):
         
         self._notify_callbacks()
 
+    def set_total(self, total: int) -> None:
+        """
+        Set the total for this stage (for pre-population).
+        
+        Allows external code to set total before stage starts.
+        Used by orchestrator to pre-populate next stage totals
+        after previous phase completes.
+        
+        Args:
+            total: Total count for this stage's progress
+        """
+        with self._lock:
+            self._progress.total = total
+            self._notify_callbacks()
 
     def reset(self) -> None:
         """Reset stage to initial state."""
