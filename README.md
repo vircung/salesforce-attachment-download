@@ -65,7 +65,8 @@ python main.py --org your-org --records-dir ./records --output ./output
 **Optional arguments:**
 - `--output`: Base output directory (default: `./output`)
 - `--batch-size`: Number of ParentIds per SOQL query batch (default: 100). Download buckets are derived from this value (not separately configurable).
-- `--download-workers`: Parallel file downloads within each bucket (default: 1)
+- `--workers`: Parallel workers for queries and downloads (default: 2, max: 8)
+- `--sync-only`: Disable threading, run sequentially (default: disabled, use for debugging)
 - `--progress`: Progress display mode (`auto`, `on`, `off`)
 - `--verbose`: Alias for default INFO logging
 - `--debug`: Enable DEBUG console logging
@@ -109,6 +110,55 @@ python main.py --org your-org --records-dir ./records --output ./output
 3. Queries attachments in batches using SOQL WHERE clause
 4. Downloads attachment files
 5. Saves metadata for reference
+
+## Threading and Performance
+
+### Threading Architecture
+
+The tool now supports parallel processing for both SOQL queries (Phase 2) and file downloads (Phase 3) to significantly improve performance. All batches/CSVs are submitted to a thread pool simultaneously, allowing multiple queries and downloads to run concurrently.
+
+- **Conservative defaults**: 2 workers by default to avoid overwhelming the Salesforce API
+- **Performance benefits**: With 4 workers and 10 CSVs, expect 3-4x faster processing compared to sequential execution
+- **Symmetric parallelism**: The same worker pool handles both queries and downloads
+
+### Configuration
+
+- **`--workers` argument**: Controls parallelism in both query and download phases (default: 2, max: 8)
+- **`WORKERS` env var**: Set `WORKERS=4` in `.env` for persistent configuration
+- **`--sync-only` flag**: Disable threading for debugging or API issues
+- **`SYNC_ONLY` env var**: Set `SYNC_ONLY=true` in `.env` to disable threading
+- **`QUERY_TIMEOUT`**: Maximum time per individual batch query (default: 600 seconds / 10 minutes)
+
+### Default Behavior
+
+- Threading is enabled by default with 2 workers
+- Each worker executes tasks sequentially (no internal parallelism within workers)
+- Total parallelism equals the thread pool size
+- Symmetric: same workers handle both queries AND downloads
+
+### Recommendations
+
+- Start with default (2 workers) for safe operation
+- For 10+ CSVs with many attachments: try 4 workers for better performance
+- For Salesforce API rate limiting issues: try `--sync-only` or reduce workers
+- Monitor logs with `--debug` for task timing and performance insights
+
+### Examples
+
+```bash
+# Default: 2 parallel workers
+python main.py --org your-org --records-dir ./records
+
+# Use 4 workers for faster processing
+python main.py --org your-org --records-dir ./records --workers 4
+
+# Disable threading for debugging
+python main.py --org your-org --records-dir ./records --sync-only
+
+# Set workers in .env file (persistent)
+# In .env: WORKERS=4
+python main.py --org your-org --records-dir ./records
+```
 
 ## Output Structure
 
@@ -172,8 +222,11 @@ The tool supports loading configuration from a `.env` file in the project root d
    DEBUG=false
 
    # Progress display configuration
-   PROGRESS=auto
-   ```
+    PROGRESS=auto
+    WORKERS=2
+    SYNC_ONLY=false
+    QUERY_TIMEOUT=600
+    ```
 
 3. **IMPORTANT**: Never commit the `.env` file to version control!
 
@@ -186,7 +239,9 @@ The tool supports loading configuration from a `.env` file in the project root d
 | `RECORDS_DIR` | Directory containing CSV files | None (required) | `--records-dir` |
 | `LOG_FILE` | Log file path | `./logs/download.log` | N/A |
 | `BATCH_SIZE` | Number of ParentIds per query batch | `100` | `--batch-size` |
-| `DOWNLOAD_WORKERS` | Parallel downloads per bucket | `1` | `--download-workers` |
+| `WORKERS` | Parallel workers for queries and downloads | `2` | `--workers` |
+| `SYNC_ONLY` | Disable threading, run sequentially | `false` | `--sync-only` |
+| `QUERY_TIMEOUT` | Maximum time per individual batch query | `600` | N/A |
 | `VERBOSE` | Enable verbose console output (INFO level) | `false` | `--verbose` |
 | `DEBUG` | Enable debug console output (DEBUG level) | `false` | `--debug` |
 | `PROGRESS` | Progress display mode: `auto`, `on`, `off` | `auto` | `--progress` |
@@ -213,30 +268,32 @@ python main.py --org your-org --records-dir ./records --batch-size 150
 
 **Default:** 100 record IDs per batch
 
-### Download Concurrency Configuration
+### Threading Configuration
 
-Control bucketed parallel file downloads and the bucket prefetch depth:
+Control parallel processing for both SOQL queries and file downloads:
 
-- `--download-workers` / `DOWNLOAD_WORKERS`: parallel file downloads **within a bucket**
+- `--workers` / `WORKERS`: number of parallel workers for queries and downloads
+- `--sync-only` / `SYNC_ONLY`: disable threading for debugging or API issues
 
 **Via .env file:**
 ```bash
-DOWNLOAD_WORKERS=1
+WORKERS=4
+SYNC_ONLY=false
 ```
 
 **Via CLI:**
 ```bash
-python main.py --org your-org --records-dir ./records --download-workers 4
+python main.py --org your-org --records-dir ./records --workers 4
+python main.py --org your-org --records-dir ./records --sync-only
 ```
 
-**Default:** 1 download worker (sequential)
+**Default:** 2 workers (parallel), threading enabled
 
 **Notes:**
-- Concurrency is isolated within each bucket (buckets are processed in order)
-- Larger batches = fewer queries but longer query execution time
-- Smaller batches = more queries but faster individual queries
-- Salesforce has SOQL query length limits (~20,000 characters)
-- If you get "query too long" errors, reduce --batch-size to 50 or lower
+- Threading is enabled by default with conservative 2 workers
+- Use `--sync-only` for debugging or when experiencing API rate limiting
+- More workers = faster processing but higher memory usage and API load
+- Salesforce may rate-limit concurrent API calls; reduce workers if you see errors
 
 ## Logging
 
@@ -343,6 +400,8 @@ The tool gracefully handles errors and provides clear error messages:
 - Invalid SOQL syntax
 - Insufficient permissions
 
+Threading uses automatic retry logic (up to 3 attempts per batch/download). If you see many retry messages, consider using `--sync-only` to reduce API load.
+
 Per-file download failures are best-effort and summarized at the end of the workflow.
 Fatal authentication errors or network/service failures will stop the workflow.
 
@@ -360,7 +419,8 @@ To avoid treating partial files as complete, downloads are written to a temporar
 --records-dir       Directory containing CSV files with record IDs (REQUIRED)
 --output            Base output directory (default: ./output)
 --batch-size        Number of ParentIds per SOQL query batch (default: 100)
---download-workers  Parallel file downloads within each bucket (default: 1)
+--workers           Parallel workers for queries and downloads (default: 2, max: 8)
+--sync-only         Disable threading, run sequentially (default: disabled, use for debugging)
 --progress          Progress display mode: auto, on, off
 --verbose           Enable verbose console output (INFO level)
 --debug             Enable debug console output (DEBUG level with technical details)
@@ -412,6 +472,32 @@ You must provide a directory containing CSV files:
 python main.py --org your-org --records-dir ./records
 ```
 
+## Troubleshooting Threading
+
+### Question: Queries/downloads running slowly in parallel mode
+
+- Try `--sync-only` to verify it's not a threading issue
+- Check `--debug` logs for timing information
+- May indicate Salesforce API rate limiting (reduce workers or use --sync-only)
+
+### Question: Getting timeout errors
+
+- Increase `QUERY_TIMEOUT` env var: `QUERY_TIMEOUT=900` (15 minutes)
+- Default is 600 seconds (10 minutes)
+- Or use `--sync-only` to eliminate timing pressure
+
+### Question: Memory usage high with threading
+
+- Reduce worker count: `--workers 2` or `--workers 1`
+- Each worker thread maintains state for active tasks
+- More workers = more memory usage
+
+### Question: "Connection reset" errors during parallel queries
+
+- Reduce workers to decrease API load: `--workers 2`
+- Or use `--sync-only` to eliminate parallelism entirely
+- Salesforce may rate-limit concurrent API calls
+
 ## Examples
 
 **Basic usage with default batch size:**
@@ -435,7 +521,7 @@ python main.py --org my-org --records-dir ./records --batch-size 200
 SF_ORG_ALIAS=my-org
 RECORDS_DIR=./records
 BATCH_SIZE=150
-DOWNLOAD_WORKERS=2
+WORKERS=4
 
 # Then run without arguments
 python main.py

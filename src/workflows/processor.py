@@ -25,8 +25,7 @@ def process_csv_records_workflow(
     records_dir: Path,
     batch_size: int = 100,
     download: bool = True,
-    progress_tracker: Optional[ProgressTracker] = None,
-    download_workers: int = 1
+    progress_tracker: Optional[ProgressTracker] = None
 ) -> Dict[str, Any]:
     """
     Process CSV files containing record IDs and download their attachments.
@@ -67,7 +66,6 @@ def process_csv_records_workflow(
     logger.info(f"Output directory: {output_dir.absolute()}")
     logger.info(f"Batch size: {batch_size}")
     logger.info(f"Download enabled: {download}")
-    logger.info(f"Download workers: {download_workers}")
 
     # Initialize progress stages
     csv_stage = CsvProcessingStage()
@@ -103,8 +101,6 @@ def process_csv_records_workflow(
         org_alias=org_alias,
         output_dir=output_dir,
         download_stage=download_stage,
-        download_workers=download_workers,
-        batch_size=batch_size,
         download_enabled=download
     )
 

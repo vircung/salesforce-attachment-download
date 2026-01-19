@@ -62,7 +62,7 @@ def main():
                 batch_size=args.batch_size,
                 download=True,
                 progress_tracker=progress_tracker,
-                download_workers=args.download_workers
+                workers=args.workers
             )
 
 

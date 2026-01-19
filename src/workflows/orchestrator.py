@@ -32,6 +32,9 @@ from src.workflows.statistics import (
 )
 from src.workflows.error_handler import WorkflowErrorHandler
 
+# Thread pool support
+from src.workflows.thread_pool import ThreadPoolConfig, WorkflowThreadPool
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +45,7 @@ def process(
     batch_size: int = 100,
     download: bool = True,
     progress_tracker: Optional[ProgressTracker] = None,
-    download_workers: int = 1
+    workers: int = 2
 ) -> Dict[str, Any]:
     """
     Main entry point: orchestrate three-phase workflow.
@@ -62,7 +65,7 @@ def process(
         batch_size: ParentIds per SOQL query (default: 100)
         download: Whether to download files (default: True)
         progress_tracker: Optional progress tracker for UI updates
-        download_workers: Parallel download workers (default: 1)
+        workers: Parallel workers for queries and downloads (default: 2)
     
     Returns:
         Dictionary with final statistics:
@@ -91,13 +94,12 @@ def process(
         SFQueryError: If query fails (fatal)
         SFAPIError: If API error occurs (fatal)
     """
-    # Log workflow parameters
     logger.info(f"Org: {org_alias}")
     logger.info(f"Records directory: {records_dir.absolute()}")
     logger.info(f"Output directory: {output_dir.absolute()}")
     logger.info(f"Batch size: {batch_size}")
     logger.info(f"Download enabled: {download}")
-    logger.info(f"Download workers: {download_workers}")
+    logger.info(f"Workers: {workers}")
     
     try:
         # Initialize progress stages
@@ -113,6 +115,11 @@ def process(
         
         # Initialize error handler
         error_handler = WorkflowErrorHandler(csv_stage, soql_stage, download_stage)
+        
+        # Create thread pool configuration and context manager
+        thread_pool_config = ThreadPoolConfig(query_workers=workers)
+        thread_pool = WorkflowThreadPool(thread_pool_config)
+        logger.debug(f"Created thread pool: workers={workers}")
         
         # ============================================================
         # PHASE 1: CSV PROCESSING
@@ -143,40 +150,36 @@ def process(
         # ============================================================
         log_section_header("PHASE 2: SOQL BATCH QUERYING")
         try:
-            query_results = execute_all_csv_queries(
-                csv_records=csv_records,
-                org_alias=org_alias,
-                output_dir=output_dir,
-                soql_stage=soql_stage,
-                batch_size=batch_size
-            )
-            
-            # Pre-populate Download stage total for Phase 3
-            total_attachments = sum(qr.total_attachments_found for qr in query_results)
-            if total_attachments > 0 and download_stage:
-                download_stage.set_total(total_attachments)
-                logger.debug(f"Pre-populated Download stage total: {total_attachments} attachments")
+            with thread_pool:
+                query_results = execute_all_csv_queries(
+                    csv_records=csv_records,
+                    org_alias=org_alias,
+                    output_dir=output_dir,
+                    soql_stage=soql_stage,
+                    thread_pool=thread_pool
+                )
+                
+                # Pre-populate Download stage total for Phase 3
+                total_attachments = sum(qr.total_attachments_found for qr in query_results)
+                if total_attachments > 0 and download_stage:
+                    download_stage.set_total(total_attachments)
+                    logger.debug(f"Pre-populated Download stage total: {total_attachments} attachments")
+                    
+                # ============================================================
+                # PHASE 3: DOWNLOADS (ALL CSVs)
+                # ============================================================
+                log_section_header("PHASE 3: DOWNLOAD ATTACHMENTS")
+                download_results = []
+                download_results = coordinate_all_downloads(
+                    query_results=query_results,
+                    org_alias=org_alias,
+                    output_dir=output_dir,
+                    download_stage=download_stage,
+                    thread_pool=thread_pool,
+                    download_enabled=download
+                )
         except Exception as e:
             error_handler.handle_query_error("all_queries", e)
-            raise
-        
-        # ============================================================
-        # PHASE 3: DOWNLOADS (ALL CSVs)
-        # ============================================================
-        log_section_header("PHASE 3: DOWNLOAD ATTACHMENTS")
-        download_results = []
-        try:
-            download_results = coordinate_all_downloads(
-                query_results=query_results,
-                org_alias=org_alias,
-                output_dir=output_dir,
-                download_stage=download_stage,
-                download_workers=download_workers,
-                batch_size=batch_size,
-                download_enabled=download
-            )
-        except Exception as e:
-            error_handler.handle_download_error("all_downloads", e)
             raise
         
         # ============================================================

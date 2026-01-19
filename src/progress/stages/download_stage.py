@@ -16,7 +16,6 @@ DOWNLOAD_STAGE_CONFIG = StageConfig(
     message_template="Downloading {current}/{total} files - {current_file}",
     details_fields=[
         "current_file",
-        "bucket",
         "file_size",
         "speed",
         "success_count",
@@ -34,11 +33,13 @@ class DownloadStage(WorkflowStage):
         super().__init__(DOWNLOAD_STAGE_CONFIG)
         self._start_time: Optional[float] = None
         self._bytes_transferred = 0
+        self._total_files: Optional[int] = None
 
     def start_downloads(self, total_files: int):
         """Start download phase."""
         self._start_time = time.time()
         self._bytes_transferred = 0
+        self._total_files = total_files
         
         self.start(
             total=total_files,
@@ -49,7 +50,6 @@ class DownloadStage(WorkflowStage):
         self,
         completed_files: int,
         current_file: Optional[str] = None,
-        bucket: Optional[str] = None,
         file_size: Optional[int] = None,
         success_count: Optional[int] = None,
         failed_count: Optional[int] = None,
@@ -83,15 +83,13 @@ class DownloadStage(WorkflowStage):
             status_parts.append(f"⊙{skipped_count}")
         
         # Build message
-        message = f"Downloaded {completed_files}/{self.progress.total} files"
+        message = f"Downloaded {completed_files}/{self._total_files} files"
         display_file = current_file
         
         # Build details
         details = {}
         if display_file:
             details['current_file'] = display_file
-        if bucket:
-            details['bucket'] = bucket
         if file_size_str:
             details['file_size'] = file_size_str
         if speed_str:

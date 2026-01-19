@@ -6,17 +6,15 @@ Manages temp directory lifecycle and executes downloads for all attachment metad
 """
 
 import logging
-import shutil
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from dataclasses import dataclass
 
 from src.download.downloader import download_attachments
-from src.api.sf_client import DEFAULT_TMP_DIR_NAME
-from src.workflows.directory_manager import get_temp_download_dir, clean_temp_directory
 from src.progress.stages import DownloadStage
 from src.utils import log_section_header
-from src.exceptions import SFAuthError, SFAPIError
+from src.exceptions import SFAuthError, SFAPIError, SFNetworkError
+from src.workflows.thread_pool import WorkflowThreadPool
 
 logger = logging.getLogger(__name__)
 
@@ -37,50 +35,45 @@ def coordinate_all_downloads(
     org_alias: str,
     output_dir: Path,
     download_stage: DownloadStage,
-    download_workers: int,
-    batch_size: int,
-    download_enabled: bool
+    thread_pool: WorkflowThreadPool,
+    download_enabled: bool = True
 ) -> List[DownloadResult]:
     """
-    Download all attachments from ALL query results sequentially.
+    Coordinate download of all attachments across all CSVs.
     
-    This is PHASE 3: For each CSV metadata result, download all attachments.
-    Downloads complete for all CSVs before workflow finishes.
-    
-    Process:
-      1. Log phase start
-      2. For each QueryResult in query_results:
-         - Call coordinate_csv_downloads()
-         - Use merged_csv_path from QueryResult
-         - Use output_dir/{csv_name}/files/ for downloads
-      3. Return list of DownloadResult (one per CSV, in same order)
+    Uses thread pool for execution.
     
     Args:
-        query_results: Results from Phase 2 (contains merged metadata CSVs)
-        org_alias: Salesforce org for authentication
+        query_results: List of query results (one per CSV)
+        org_alias: Salesforce org alias
         output_dir: Base output directory
-        download_stage: Progress stage for downloads
-        download_workers: Parallel download workers
-        batch_size: Batch size for download workers
-        download_enabled: Whether to actually download (True/False)
+        download_stage: Progress tracking stage (must be pre-initialized)
+        thread_pool: Thread pool for execution
+        download_enabled: Whether to actually download files
     
     Returns:
-        List[DownloadResult] in same order as query_results
+        List of DownloadResult objects (one per CSV)
     
     Raises:
-        SFAuthError: If auth fails (entire Phase 3 fails)
-        SFAPIError: If API error occurs (entire Phase 3 fails)
+        SFNetworkError: If network error occurs during download
+        SFAuthError: If authentication fails
+        SFAPIError: If API error occurs
     """
     log_section_header("PHASE 3: DOWNLOAD ATTACHMENTS")
     
     download_results = []
+    
+    # Calculate global total ONCE
     total_attachments_all = sum(qr.total_attachments_found for qr in query_results)
     
+    # Initialize progress ONCE with global total (coordinator's responsibility)
+    download_stage.start_downloads(total_attachments_all)
+    
+    # Early return: downloads disabled
     if not download_enabled:
         logger.info("Download phase skipped (download=False)")
-        download_stage.skip("Download disabled")
+        download_stage.complete("Download disabled")
         
-        # Return skip results for all CSVs
         for query_result in query_results:
             download_results.append(DownloadResult(
                 csv_name=query_result.csv_name,
@@ -92,9 +85,10 @@ def coordinate_all_downloads(
             ))
         return download_results
     
+    # Early return: no attachments
     if total_attachments_all == 0:
         logger.info("No attachments to download")
-        download_stage.skip("No attachments found")
+        download_stage.complete("No attachments found")
         return [
             DownloadResult(
                 csv_name=qr.csv_name,
@@ -107,128 +101,65 @@ def coordinate_all_downloads(
             for qr in query_results
         ]
     
-    # Start download stage
-    download_stage.start_downloads(total_attachments_all)
+    # Execute downloads: always use thread pool
+    logger.info(f"Downloading {total_attachments_all} attachments with {thread_pool.config.query_workers} workers")
     
-    # Download for each CSV
-    for csv_idx, query_result in enumerate(query_results, start=1):
-        logger.info(f"Downloading CSV {csv_idx}/{len(query_results)}: {query_result.csv_name}")
-        
-        # Get CSV-specific file output directory
+    # Clear any leftover results from previous phases
+    thread_pool.clear_results()
+    
+    # Submit all CSV downloads to thread pool
+    for query_result in query_results:
         csv_files_dir = output_dir / query_result.csv_name / 'files'
         
-        # Download attachments for this CSV
-        result = coordinate_csv_downloads(
-            csv_name=query_result.csv_name,
-            merged_metadata_csv=query_result.merged_csv_path,
-            csv_files_dir=csv_files_dir,
-            org_alias=org_alias,
-            output_dir=output_dir,
-            download_stage=download_stage,
-            download_workers=download_workers,
-            batch_size=batch_size
+        thread_pool.submit_task(
+            task_id=f"download_{query_result.csv_name}",
+            fn=download_attachments,
+            args=(
+                query_result.merged_csv_path,      # metadata_csv
+                csv_files_dir,                      # output_dir
+                org_alias,                          # org_alias
+                None,                               # filter_config
+                download_stage                      # progress_stage (NO INIT!)
+            )
         )
-        
-        download_results.append(result)
     
-    # Complete download stage
+    # Wait for all downloads to complete
+    worker_results = thread_pool.wait_for_completion(phase_name="download")
+    
+    # Check for failures
+    failed_tasks = [wr for wr in worker_results if not wr.success]
+    if failed_tasks:
+        error_details = [f"{wr.task_id}: {wr.error}" for wr in failed_tasks]
+        error_msg = f"Download phase failed: {len(failed_tasks)} CSV(s) failed\n" + "\n".join(error_details)
+        download_stage.fail(error_msg)
+        raise SFAPIError(error_msg)
+    
+    # Convert worker results to DownloadResult
+    for worker_result in worker_results:
+        if worker_result.result is None:
+            continue  # Skip if no result
+        stats = worker_result.result
+        csv_name = worker_result.task_id.replace("download_", "")
+        
+        download_results.append(DownloadResult(
+            csv_name=csv_name,
+            downloaded_count=stats['success'],
+            skipped_count=stats['skipped'],
+            failed_count=stats['failed'],
+            errors=stats['errors'],
+            total_attachments=stats['total']
+        ))
+    
+    # Aggregate final stats
     total_downloaded = sum(dr.downloaded_count for dr in download_results)
     total_failed = sum(dr.failed_count for dr in download_results)
     total_skipped = sum(dr.skipped_count for dr in download_results)
     
+    # Complete progress with summary
     download_stage.complete(
         f"Downloaded {total_downloaded} files, failed {total_failed}, skipped {total_skipped}"
     )
     
+    logger.info(f"Download phase complete: {total_downloaded} downloaded, {total_failed} failed, {total_skipped} skipped")
+    
     return download_results
-
-
-def coordinate_csv_downloads(
-    csv_name: str,
-    merged_metadata_csv: Path,
-    csv_files_dir: Path,
-    org_alias: str,
-    output_dir: Path,
-    download_stage: DownloadStage,
-    download_workers: int,
-    batch_size: int
-) -> DownloadResult:
-    """
-    Download all attachments for a SINGLE CSV metadata file.
-    Manages temp directory lifecycle (create, use, cleanup).
-    
-    Process:
-      1. Create temp directory
-      2. Call download_attachments() with metadata CSV
-      3. Update download stage
-      4. Clean temp directory
-      5. Return DownloadResult with counts
-    
-    Args:
-        csv_name: Name of source CSV (for logging)
-        merged_metadata_csv: Metadata CSV from Phase 2
-        csv_files_dir: Output directory for downloaded files
-        org_alias: Salesforce org for authentication
-        output_dir: Base output dir (for temp directory path)
-        download_stage: Progress stage for updates
-        download_workers: Parallel download workers
-        batch_size: Batch size for workers
-    
-    Returns:
-        DownloadResult with counts and errors
-    
-    Raises:
-        SFAuthError: If auth fails (propagate to orchestrator)
-        SFAPIError: If API error occurs (propagate to orchestrator)
-    """
-    # Create temp directory
-    global_tmp_dir = get_temp_download_dir(output_dir)
-    global_tmp_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Clean temp directory if it has leftovers
-    if any(global_tmp_dir.iterdir()):
-        shutil.rmtree(global_tmp_dir)
-        global_tmp_dir.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        logger.info(f"Downloading {csv_name}: {merged_metadata_csv.name}")
-        
-        # Call existing downloader
-        download_stats = download_attachments(
-            metadata_csv=merged_metadata_csv,
-            output_dir=csv_files_dir,
-            org_alias=org_alias,
-            filter_config=None,  # No additional filtering
-            progress_stage=download_stage,
-            download_workers=download_workers,
-            batch_size=batch_size
-        )
-        
-        # Extract results
-        downloaded_count = download_stats.get('success', 0)
-        skipped_count = download_stats.get('skipped', 0)
-        failed_count = download_stats.get('failed', 0)
-        errors = download_stats.get('errors', [])
-        
-        logger.info(
-            f"Downloaded: {downloaded_count}, Skipped: {skipped_count}, "
-            f"Failed: {failed_count}"
-        )
-        
-        return DownloadResult(
-            csv_name=csv_name,
-            downloaded_count=downloaded_count,
-            skipped_count=skipped_count,
-            failed_count=failed_count,
-            errors=errors,
-            total_attachments=downloaded_count + skipped_count + failed_count
-        )
-    
-    finally:
-        # Clean temp directory
-        try:
-            if global_tmp_dir.exists():
-                shutil.rmtree(global_tmp_dir)
-                logger.info("Cleaned temp download directory")
-        except Exception as e:
-            logger.warning(f"Failed to clean temp directory: {e}")

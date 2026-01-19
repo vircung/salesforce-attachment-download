@@ -34,7 +34,8 @@ def parse_arguments():
     # CSV Records processing configuration from .env
     env_records_dir = os.getenv('RECORDS_DIR')
     env_batch_size = os.getenv('BATCH_SIZE', '100')
-    env_download_workers = os.getenv('DOWNLOAD_WORKERS', '1')
+    env_workers = os.getenv('WORKERS', '2')
+    env_sync_only = os.getenv('SYNC_ONLY', 'false').lower() in ('true', '1', 'yes')
     
     # Logging configuration from .env
     env_verbose = os.getenv('VERBOSE', 'false').lower() in ('true', '1', 'yes')
@@ -58,20 +59,16 @@ def parse_arguments():
         logger.warning(f"Invalid BATCH_SIZE value '{env_batch_size}', using default 100")
         default_batch_size = 100
 
-    # Validate and convert DOWNLOAD_WORKERS to int
-    default_download_workers = 1
+    # Validate and convert WORKERS to int
+    default_workers = 2
     try:
-        default_download_workers = int(env_download_workers)
-        if default_download_workers < 1:
-            logger.warning(
-                f"DOWNLOAD_WORKERS must be at least 1, got {default_download_workers}. Using default 1."
-            )
-            default_download_workers = 1
+        default_workers = int(env_workers)
+        if default_workers < 1 or default_workers > 8:
+            logger.warning(f"WORKERS must be 1-8, got {default_workers}. Using 2.")
+            default_workers = 2
     except ValueError:
-        logger.warning(
-            f"Invalid DOWNLOAD_WORKERS value '{env_download_workers}', using default 1"
-        )
-        default_download_workers = 1
+        logger.warning(f"Invalid WORKERS value '{env_workers}', using 2")
+        default_workers = 2
 
 
     parser = argparse.ArgumentParser(
@@ -102,10 +99,16 @@ def parse_arguments():
         help=f'Number of ParentIds per SOQL query batch (default: {default_batch_size})'
     )
     parser.add_argument(
-        '--download-workers',
+        '--workers',
         type=int,
-        default=default_download_workers,
-        help=f'Parallel downloads per bucket (default: {default_download_workers})'
+        default=default_workers,
+        help=f'Parallel workers for queries and downloads (default: {default_workers}, max: 8)'
+    )
+    parser.add_argument(
+        '--sync-only',
+        action='store_true',
+        default=env_sync_only,
+        help='Disable threading, run queries/downloads sequentially (default: False)'
     )
     parser.add_argument(
         '--verbose',
@@ -140,11 +143,16 @@ def parse_arguments():
         # Default to INFO so user sees progress (not silent)
         args.console_log_level = logging.INFO
 
-    if args.download_workers < 1:
+    # If sync-only is set, force workers to 1
+    if args.sync_only:
+        args.workers = 1
+        logger.info("--sync-only: forcing --workers=1")
+
+    if args.workers < 1 or args.workers > 8:
         logger.warning(
-            f"--download-workers must be at least 1, got {args.download_workers}. Using default 1."
+            f"--workers must be 1-8, got {args.workers}. Using default 2."
         )
-        args.download_workers = 1
+        args.workers = 2
 
 
     # Resolve records directory from CLI or env
