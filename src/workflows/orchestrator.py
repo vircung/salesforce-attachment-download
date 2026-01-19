@@ -22,7 +22,7 @@ from src.constants import WorkflowPhase
 # Coordinators
 from src.workflows.csv_coordinator import coordinate_csv_processing
 from src.workflows.query_coordinator import execute_all_csv_queries
-from src.workflows.download_coordinator import coordinate_all_downloads, DownloadResult
+# from src.workflows.download_coordinator import coordinate_all_downloads, DownloadResult  # Moved to function scope to avoid circular import
 
 # Support modules
 from src.workflows.directory_manager import create_csv_directories
@@ -166,6 +166,7 @@ def process(
                 # ============================================================
                 log_section_header(WorkflowPhase.DOWNLOADS)
                 download_results = []
+                from src.workflows.download_coordinator import coordinate_all_downloads  # Lazy import to avoid circular dependency
                 download_results = coordinate_all_downloads(
                     query_results=query_results,
                     org_alias=org_alias,

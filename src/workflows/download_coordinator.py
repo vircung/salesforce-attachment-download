@@ -7,13 +7,14 @@ Manages temp directory lifecycle and executes downloads for all attachment metad
 
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Dict, Any
 from dataclasses import dataclass
+from threading import Lock
 
-from src.download.downloader import download_attachments
+# from src.download.downloader import download_attachments  # Moved to function scope to avoid circular import
 from src.progress.stages import DownloadStage
 from src.utils import log_section_header
-from src.exceptions import SFAuthError, SFAPIError, SFNetworkError
+from src.exceptions import SFAPIError
 from src.workflows.thread_pool import WorkflowThreadPool
 from src.constants import WorkflowPhase
 
@@ -27,12 +28,12 @@ class DownloadResult:
     downloaded_count: int
     skipped_count: int
     failed_count: int
-    errors: List[dict]
+    errors: List[Dict[str, Any]]
     total_attachments: int
 
 
 def coordinate_all_downloads(
-    query_results: List,  # List[QueryResult] but avoid circular import
+    query_results: List[Any],  # List[QueryResult] but avoid circular import
     org_alias: str,
     output_dir: Path,
     download_stage: DownloadStage,
@@ -108,7 +109,14 @@ def coordinate_all_downloads(
     # Clear any leftover results from previous phases
     thread_pool.clear_results()
     
+    # Create shared counter for progress tracking across all workers
+    completed_counter = {
+        'count': 0,
+        'lock': Lock()
+    }
+    
     # Submit all CSV downloads to thread pool
+    from src.download.downloader import download_attachments  # Lazy import to avoid circular dependency
     for query_result in query_results:
         csv_files_dir = output_dir / query_result.csv_name / 'files'
         
@@ -120,7 +128,8 @@ def coordinate_all_downloads(
                 csv_files_dir,                      # output_dir
                 org_alias,                          # org_alias
                 None,                               # filter_config
-                download_stage                      # progress_stage (NO INIT!)
+                download_stage,                     # progress_stage
+                completed_counter                   # shared counter for global progress tracking
             )
         )
     

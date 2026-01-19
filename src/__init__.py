@@ -20,13 +20,13 @@ from src.csv.utils import process_records_directory
 from src.csv.validator import validate_metadata_csv
 
 # Download
-from src.download.downloader import download_attachments
+# from src.download.downloader import download_attachments  # Removed to avoid circular import - import directly when needed
 from src.download.stats import DownloadStats
 from src.download.filename import FilenameInfo, sanitize_filename, detect_filename_collisions
 from src.download.metadata import read_metadata_csv
 
 # Workflows
-from src.workflows.orchestrator import process
+# from src.workflows.orchestrator import process  # Removed to avoid circular import - import directly when needed
 
 # CLI
 from src.cli.config import parse_arguments
@@ -57,14 +57,13 @@ __all__ = [
     "process_records_directory",
     "validate_metadata_csv",
     # Download
-    "download_attachments",
     "DownloadStats",
     "FilenameInfo",
     "sanitize_filename",
     "detect_filename_collisions",
     "read_metadata_csv",
     # Workflows
-    "process",
+    # "process",  # Removed to avoid circular import
     # CLI
     "parse_arguments",
     # Utils

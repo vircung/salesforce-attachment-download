@@ -1,5 +1,5 @@
 """File download operations"""
-from src.download.downloader import download_attachments
+# from src.download.downloader import download_attachments  # Removed to avoid circular import - import directly when needed
 from src.download.stats import DownloadStats
 from src.download.filename import (
     FilenameInfo,
@@ -11,7 +11,7 @@ from src.download.filename import (
 from src.download.metadata import read_metadata_csv
 
 __all__ = [
-    "download_attachments",
+    # "download_attachments",  # Removed to avoid circular import
     "DownloadStats",
     "FilenameInfo",
     "sanitize_filename",

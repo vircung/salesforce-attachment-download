@@ -6,21 +6,19 @@ based on CSV metadata file.
 """
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, Optional, Iterable, Tuple
+from typing import Dict, Any, Optional, TypedDict
+from threading import Lock
 
 from src.api.sf_auth import get_sf_auth_info
 from src.api.sf_client import SalesforceClient
 from src.exceptions import SFAuthError, SFAPIError, SFNetworkError
 from src.query.filters import ParentIdFilter, apply_parent_id_filter, log_filter_summary
 
-from src.workflows.common import ensure_directories
+# from src.workflows.common import ensure_directories  # Moved to function scope to avoid circular import
 from .stats import DownloadStats
 from .metadata import read_metadata_csv
 from .filename import (
-    FilenameInfo,
     DEFAULT_PARENT_ID,
     sanitize_filename,
     detect_filename_collisions,
@@ -36,7 +34,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-
+class CompletedCounter(TypedDict):
+    count: int
+    lock: Lock
 
 
 def download_single(
@@ -139,7 +139,8 @@ def download_attachments(
     output_dir: Path,
     org_alias: Optional[str] = None,
     filter_config: Optional[ParentIdFilter] = None,
-    progress_stage: Optional[Any] = None
+    progress_stage: Optional[Any] = None,
+    completed_counter: Optional[CompletedCounter] = None
 ) -> Dict[str, Any]:
     """
     Main function to download all attachments from metadata CSV.
@@ -152,6 +153,8 @@ def download_attachments(
         progress_stage: Optional progress tracking stage.
                If provided, MUST be pre-initialized by caller with start_downloads().
                This function only updates progress, does not initialize it.
+        completed_counter: Optional shared counter dict with 'count' and 'lock' keys for multi-worker progress tracking.
+               Enables accurate global progress reporting across parallel workers.
 
     Returns:
         Dictionary with summary statistics including:
@@ -213,6 +216,7 @@ def download_attachments(
 
             # Step 4: Download files
    
+            from src.workflows.common import ensure_directories  # Lazy import to avoid circular dependency
             ensure_directories(output_dir)
 
             # Early exit if no attachments
@@ -270,11 +274,19 @@ def download_attachments(
                             'error': result.get('error', 'Download error')
                         })
 
-                    # Update progress
+                    # Update progress with global counter if available
                     if progress_stage:
                         try:
+                            # Use global counter if provided, otherwise fall back to local count
+                            if completed_counter:
+                                with completed_counter['lock']:
+                                    completed_counter['count'] += 1
+                                    global_completed = completed_counter['count']
+                            else:
+                                global_completed = stats.completed
+                            
                             progress_stage.update_download(
-                                completed_files=stats.completed,
+                                completed_files=global_completed,
                                 current_file=original_name,
                                 success_count=stats.success,
                                 failed_count=stats.failed,
@@ -287,6 +299,10 @@ def download_attachments(
                 except Exception as e:
                     stats.failed += 1
                     stats.completed += 1
+                    # Atomically increment global counter on error
+                    if completed_counter:
+                        with completed_counter['lock']:
+                            completed_counter['count'] += 1
                     stats.errors.append({
                         'id': attachment_id,
                         'name': original_name,
@@ -311,5 +327,3 @@ def download_attachments(
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         raise
-
-
