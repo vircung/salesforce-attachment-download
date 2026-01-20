@@ -67,7 +67,7 @@ python main.py --org your-org --records-dir ./records --output ./output
 - `--batch-size`: Number of ParentIds per SOQL query batch (default: 100). Download buckets are derived from this value (not separately configurable).
 - `--workers`: Parallel workers for queries and downloads (default: 2, max: 8)
 - `--sync-only`: Disable threading, run sequentially (default: disabled, use for debugging)
-- `--progress`: Progress display mode (`auto`, `on`, `off`)
+- `--progress`: Progress display mode (`auto`, `on`, `off`, `tqdm`)
 - `--verbose`: Alias for default INFO logging
 - `--debug`: Enable DEBUG console logging
 
@@ -244,7 +244,7 @@ The tool supports loading configuration from a `.env` file in the project root d
 | `QUERY_TIMEOUT` | Maximum time per individual batch query | `600` | N/A |
 | `VERBOSE` | Enable verbose console output (INFO level) | `false` | `--verbose` |
 | `DEBUG` | Enable debug console output (DEBUG level) | `false` | `--debug` |
-| `PROGRESS` | Progress display mode: `auto`, `on`, `off` | `auto` | `--progress` |
+| `PROGRESS` | Progress display mode: `auto`, `on`, `off`, `tqdm` | `auto` | `--progress` |
 
 **Configuration Precedence:**
 
@@ -345,7 +345,7 @@ The progress UI auto-selects a renderer (prefers `rich`, falls back to `tqdm`). 
 
 **Via .env file:**
 ```bash
-PROGRESS=auto  # auto, on, off
+PROGRESS=auto  # auto, on, off, tqdm
 ```
 
 **Via CLI flags:**
@@ -353,6 +353,7 @@ PROGRESS=auto  # auto, on, off
 --progress auto
 --progress on
 --progress off
+--progress tqdm
 ```
 
 ### Log Output
@@ -421,7 +422,7 @@ To avoid treating partial files as complete, downloads are written to a temporar
 --batch-size        Number of ParentIds per SOQL query batch (default: 100)
 --workers           Parallel workers for queries and downloads (default: 2, max: 8)
 --sync-only         Disable threading, run sequentially (default: disabled, use for debugging)
---progress          Progress display mode: auto, on, off
+--progress          Progress display mode: auto, on, off, tqdm
 --verbose           Enable verbose console output (INFO level)
 --debug             Enable debug console output (DEBUG level with technical details)
 ```

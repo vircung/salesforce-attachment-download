@@ -24,6 +24,7 @@ class ProgressMode(Enum):
     AUTO = "auto"      # Automatically choose best renderer
     ON = "on"          # Force progress display (prefer rich)
     OFF = "off"        # Disable progress display
+    TQDM = "tqdm"      # Force tqdm renderer usage
 
 
 class ProgressRenderer(ABC):
@@ -210,7 +211,9 @@ class ProgressTracker:
             try:
                 from src.progress.config import auto_select_renderer
 
-                renderer = auto_select_renderer()
+                # Pass mode hint for forced renderer selection
+                mode_hint = self.mode.value if self.mode == ProgressMode.TQDM else None
+                renderer = auto_select_renderer(mode_hint)
                 if renderer:
                     logger.debug(f"Auto-selected renderer: {type(renderer).__name__}")
                 else:

@@ -90,7 +90,6 @@ class RendererRegistry:
         
         Thread-safe with caching to avoid repeated expensive checks.
         """
-        config = get_config()
         
         with self._lock:
             current_time = time.time()
@@ -119,6 +118,30 @@ class RendererRegistry:
                 logger.error(f"Error during renderer auto-selection: {e}")
                 self._cached_selection = None
                 return None
+    
+    def select_forced_renderer(self, mode: str) -> Optional[Type[ProgressRenderer]]:
+        """
+        Select a renderer based on forced mode.
+        
+        Args:
+            mode: The forced mode ('tqdm')
+            
+        Returns:
+            Renderer class or None if unavailable
+        """
+        with self._lock:
+            try:
+                if mode == 'tqdm':
+                    from .display.tqdm_renderer import TqdmProgressRenderer, is_tqdm_available
+                    if is_tqdm_available():
+                        test_instance = TqdmProgressRenderer()
+                        if test_instance.is_available():
+                            return TqdmProgressRenderer
+            except Exception as e:
+                logger.debug(f"Renderer for mode '{mode}' unavailable: {e}")
+                return None
+            
+            return None
     
     def _select_best_renderer(self) -> Optional[Type[ProgressRenderer]]:
         """Select the best available renderer based on priority and availability."""
@@ -177,14 +200,21 @@ def get_renderer_registry() -> RendererRegistry:
     return _renderer_registry
 
 
-def auto_select_renderer() -> Optional[ProgressRenderer]:
+def auto_select_renderer(mode: Optional[str] = None) -> Optional[ProgressRenderer]:
     """
     Auto-select and instantiate the best available renderer.
+    
+    Args:
+        mode: Optional forced mode ('tqdm' to force tqdm renderer)
     
     Returns:
         ProgressRenderer instance or None if no renderer available
     """
-    renderer_class = _renderer_registry.auto_select()
+    if mode == 'tqdm':
+        renderer_class = _renderer_registry.select_forced_renderer(mode)
+    else:
+        renderer_class = _renderer_registry.auto_select()
+    
     if renderer_class is None:
         return None
     

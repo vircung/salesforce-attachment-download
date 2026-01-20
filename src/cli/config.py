@@ -43,7 +43,7 @@ def parse_arguments():
 
     # Progress display configuration from .env
     env_progress = os.getenv('PROGRESS', 'auto').lower()
-    if env_progress not in ('auto', 'on', 'off'):
+    if env_progress not in ('auto', 'on', 'off', 'tqdm'):
         logger.warning(f"Invalid PROGRESS value '{env_progress}', using default 'auto'")
         env_progress = 'auto'
 
@@ -124,9 +124,9 @@ def parse_arguments():
     )
     parser.add_argument(
         '--progress',
-        choices=['auto', 'on', 'off'],
+        choices=['auto', 'on', 'off', 'tqdm'],
         default=env_progress,
-        help=f'Progress display mode: auto (detect best), on (force display), off (disable). (default: {env_progress})'
+        help=f'Progress display mode: auto (detect best), on (force display), off (disable), tqdm (force tqdm). (default: {env_progress})'
     )
 
     args = parser.parse_args()
