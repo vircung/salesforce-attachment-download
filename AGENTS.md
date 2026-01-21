@@ -13,7 +13,6 @@ Python 3.8+ | requests, python-dotenv | Salesforce CLI (`sf`) required
 python main.py                                          # Run (args from .env)
 python main.py --org <alias> --records-dir ./records   # Run with explicit args
 pip install -r requirements.txt                         # Install deps
-cp .env.example .env                                    # Setup config
 sf org login web --alias <org>                          # Auth prerequisite
 ```
 
@@ -40,6 +39,7 @@ src/
 ## Critical Rules
 - **NO git commits** - stage files only, user commits manually
 - **NEVER commit .env** - contains credentials
+- **Don't override .env with .env.example** - update only if needed
 - **Keep README.md updated** - sync docs when changing CLI args, features, or structure
 - No tests or linting configured
 
