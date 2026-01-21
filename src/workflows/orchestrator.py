@@ -9,12 +9,10 @@ Simplified orchestration layer that delegates to specialized coordinators.
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
-from dataclasses import asdict
 
 from src.utils import log_section_header
 from src.progress.core import ProgressTracker
 from src.progress.stages import CsvProcessingStage, SoqlQueryStage, DownloadStage
-from src.progress.core.stage import StageStatus
 from src.exceptions import SFAuthError, SFQueryError, SFAPIError
 from src.workflows.exception_handler import WorkflowExceptionHandler
 from src.constants import WorkflowPhase
@@ -237,7 +235,6 @@ def process(
         download_stage.complete(f"Downloaded {stats['total_attachments']} attachments")
         
         # Log final summary
-        log_section_header(WorkflowPhase.SUMMARY)
         logger.info(f"Total CSV files: {stats['total_csv_files']}")
         logger.info(f"Total records: {stats['total_records']}")
         logger.info(f"Total batches executed: {stats['total_batches']}")

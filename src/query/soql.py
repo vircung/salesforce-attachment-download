@@ -9,11 +9,16 @@ import subprocess
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Literal, NoReturn
+from typing import Literal, NoReturn, Any
+from threading import Lock
 
 from src.exceptions import SFQueryError, SFAuthError
 
 logger = logging.getLogger(__name__)
+
+# Thread-safe flag to track if query template details have been logged
+_query_logged_lock = Lock()
+_query_logged = False
 
 # Salesforce Attachment fields to query
 ATTACHMENT_FIELDS = [
@@ -81,8 +86,17 @@ def execute_soql_query(
         Path('./accounts.csv')
     """
     logger.debug("Executing SOQL query via sf CLI...")
-    logger.debug(f"Query length: {len(query)} chars")
-    logger.debug(f"Query preview: {query[:150]}...")
+    
+    # Log query template details only once per execution
+    global _query_logged
+    with _query_logged_lock:
+        if not _query_logged:
+            logger.debug(f"Query length: {len(query)} chars")
+            logger.debug(f"Query preview: {query[:150]}...")
+            _query_logged = True
+    
+    # Always log execution progress
+    logger.debug("Executing query batch")
     
     # Ensure output directory exists
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -192,7 +206,7 @@ def _count_records(output_file: Path, result_format: str) -> int:
         return -1  # Unknown
 
 
-def _handle_query_error(result: subprocess.CompletedProcess, query: str, org_alias: str) -> NoReturn:
+def _handle_query_error(result: subprocess.CompletedProcess[Any], query: str, org_alias: str) -> NoReturn:
     """
     Analyze error output and raise appropriate exception with helpful message.
     

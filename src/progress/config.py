@@ -77,7 +77,7 @@ class RendererRegistry:
             self._renderers[name] = renderer_class
             # Invalidate cached selection
             self._cached_selection = None
-            logger.debug(f"Registered renderer: {name}")
+            # Removed individual renderer registration logging
     
     def get_renderer(self, name: str) -> Optional[Type[ProgressRenderer]]:
         """Get a specific renderer by name."""
@@ -108,7 +108,8 @@ class RendererRegistry:
                 self._last_selection_time = current_time
                 
                 if selected_renderer:
-                    logger.debug(f"Auto-selected renderer: {selected_renderer.__name__}")
+                    # Log final selection only
+                    logger.debug(f"Using progress renderer: {selected_renderer.__name__}")
                 else:
                     logger.warning("No suitable progress renderer found")
                 

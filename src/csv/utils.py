@@ -300,14 +300,11 @@ def process_records_directory(
         FileNotFoundError: If directory doesn't exist
         ValueError: If no CSV files found or any CSV is invalid
     """
-    from src.constants import CsvRecordInfo  # Import here to avoid circular import
+    # CsvRecordInfo import handled in prepare_csv_record_info function
 
-    logger.debug("=" * 60)
-    logger.debug("CSV RECORDS PROCESSING")
-    logger.debug("=" * 60)
     logger.debug(f"Records directory: {records_dir.absolute()}")
     logger.debug(f"Batch size: {batch_size}")
-
+    
     # Discover CSV files
     csv_files = discover_csv_files(records_dir)
 

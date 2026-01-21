@@ -10,15 +10,20 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from threading import Lock
 
-from simple_salesforce import Salesforce
+from simple_salesforce.api import Salesforce
 
 from src.api.sf_connection import SalesforceConnectionPool
 from src.api.sf_error_handler import SalesforceErrorHandler
 from src.api.usage_monitor import SalesforceUsageMonitor
-from src.exceptions import SFQueryError, SFAuthError
+from src.exceptions import SFQueryError
 
 logger = logging.getLogger(__name__)
+
+# Thread-safe flag to track if query template details have been logged
+_query_logged_lock = Lock()
+_query_logged = False
 
 # Salesforce Attachment fields to query
 ATTACHMENT_FIELDS = [
@@ -76,9 +81,18 @@ def execute_soql_query_simple_salesforce(
         SFQueryError: If query execution fails
     """
     logger.debug("Executing SOQL query with simple-salesforce...")
-    logger.debug(f"Query length: {len(query)} chars")
-    logger.debug(f"Query preview: {query[:150]}...")
-
+    
+    # Log query template details only once per execution
+    global _query_logged
+    with _query_logged_lock:
+        if not _query_logged:
+            logger.debug(f"Query length: {len(query)} chars")
+            logger.debug(f"Query preview: {query[:150]}...")
+            _query_logged = True
+    
+    # Always log execution progress
+    logger.debug("Executing query batch")
+    
     # Ensure output directory exists
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -90,7 +104,7 @@ def execute_soql_query_simple_salesforce(
     try:
         # Execute query with retry logic if error handler provided
         if error_handler:
-            def query_operation():
+            def query_operation() -> Any:
                 return sf_client.query_all(query)
 
             result = error_handler.execute_with_retry(query_operation)
@@ -104,7 +118,7 @@ def execute_soql_query_simple_salesforce(
             usage_monitor.track_call('query', response_time, success=True)
 
         records = result['records']
-        total_size = result['totalSize']
+        total_size = int(result['totalSize'])
 
         logger.info(f"✓ Query successful: {total_size} records retrieved")
 
@@ -207,7 +221,7 @@ def query_attachments_with_simple_salesforce(
     if connection_pool:
         sf_client = connection_pool.get_connection()
         try:
-            record_count = execute_soql_query_simple_salesforce(
+            execute_soql_query_simple_salesforce(
                 sf_client, query, output_file, error_handler, usage_monitor
             )
             return output_file
@@ -219,7 +233,7 @@ def query_attachments_with_simple_salesforce(
         adapter = SFCLIAuthAdapter(org_alias)
         sf_client = adapter.get_client()
 
-        record_count = execute_soql_query_simple_salesforce(
+        execute_soql_query_simple_salesforce(
             sf_client, query, output_file, error_handler, usage_monitor
         )
         return output_file

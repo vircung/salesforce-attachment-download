@@ -7,7 +7,6 @@ message buffering, and progress mode coordination.
 
 import logging
 import sys
-import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -131,6 +130,12 @@ class LoggingManager:
             root_logger.handlers.clear()
             root_logger.addHandler(self._file_handler)
             root_logger.addHandler(self._console_handler)
+            
+            # Suppress external library debug noise
+            logging.getLogger('urllib3').setLevel(logging.WARNING)
+            logging.getLogger('requests').setLevel(logging.WARNING)
+            logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+            logging.getLogger('chardet.charsetprober').setLevel(logging.WARNING)
             
             logger.debug("Logging manager setup complete")
     

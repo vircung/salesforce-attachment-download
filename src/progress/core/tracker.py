@@ -9,7 +9,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from threading import RLock
-from typing import Dict, Optional, List, Any, TYPE_CHECKING
+from typing import Dict, Optional, Any, TYPE_CHECKING
 
 from src.progress.core.stage import ProgressStage, StageStatus
 
@@ -215,7 +215,8 @@ class ProgressTracker:
                 mode_hint = self.mode.value if self.mode == ProgressMode.TQDM else None
                 renderer = auto_select_renderer(mode_hint)
                 if renderer:
-                    logger.debug(f"Auto-selected renderer: {type(renderer).__name__}")
+                    # Log final selection only
+                    logger.debug(f"Using progress renderer: {type(renderer).__name__}")
                 else:
                     logger.warning("No suitable progress renderer available")
 

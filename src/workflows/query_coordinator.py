@@ -9,13 +9,12 @@ Results are merged per CSV file (not globally).
 import csv
 import logging
 from pathlib import Path
-from typing import List, Optional, cast
+from typing import List
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Lock
 
-from src.utils import log_section_header
-from src.constants import WorkflowPhase, CsvRecordInfo
+from src.constants import CsvRecordInfo
 from src.progress.stages import SoqlQueryStage
 from src.workflows.thread_pool import WorkflowThreadPool
 from src.api.sf_connection import SalesforceConnectionPool
@@ -90,8 +89,6 @@ def execute_all_csv_queries(
         SFAuthError: If auth fails (entire Phase 2 fails)
         SFAPIError: If API error occurs (entire Phase 2 fails)
     """
-    log_section_header(WorkflowPhase.SOQL_QUERYING)
-    
     # Calculate total batches across all CSVs
     total_batches_all_csvs = sum(csv_info.total_batches for csv_info in csv_records)
     

@@ -11,8 +11,6 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from threading import Lock
 
-from src.utils import log_section_header
-from src.constants import WorkflowPhase
 from src.progress.stages import DownloadStage
 from src.workflows.thread_pool import WorkflowThreadPool
 from src.api.sf_connection import SalesforceConnectionPool
@@ -66,8 +64,6 @@ def coordinate_all_downloads(
         SFAuthError: If authentication fails
         SFAPIError: If API error occurs
     """
-    log_section_header(WorkflowPhase.DOWNLOADS)
-    
     download_results = []
     
     # Calculate global total ONCE

@@ -94,7 +94,7 @@ def merge_csv_files(
             # Accumulate all rows
             batch_rows = list(reader)
             accumulated_rows.extend(batch_rows)
-            logger.debug(f"Read {len(batch_rows)} rows from {csv_path.name}")
+            # Removed per-file row count logging to reduce noise
     
     # Write merged CSV
     with output_path.open('w', encoding='utf-8', newline='') as f:

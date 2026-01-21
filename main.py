@@ -9,6 +9,7 @@ Runs the CSV-based workflow:
 
 import sys
 import logging
+from datetime import datetime
 
 from src.cli.config import parse_arguments
 from src.workflows.orchestrator import process
@@ -29,6 +30,10 @@ def main():
     """
     # Parse arguments and load configuration
     args = parse_arguments()
+
+    # Generate timestamp for log file
+    log_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    args.log_file = args.log_file.parent / f"download_{log_timestamp}.log"
 
     # Setup logging with progress-aware management
     logging_manager = LoggingManager.get_instance()

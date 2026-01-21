@@ -8,7 +8,6 @@ import os
 import argparse
 import logging
 from pathlib import Path
-from typing import Optional
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
