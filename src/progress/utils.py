@@ -11,7 +11,7 @@ from .core import ProgressTracker, ProgressMode
 DETAIL_KEYS_BY_STAGE = {
     "csv_processing": ["current_csv", "current_records", "total_records"],
     "soql_query": ["current_csv", "current_batch", "total_attachments"],
-    "file_downloads": ["bucket", "current_file", "speed", "success_count", "failed_count", "skipped_count"],
+    "file_downloads": ["bucket", "current_file", "speed"],
 }
 
 DETAIL_LABELS = {

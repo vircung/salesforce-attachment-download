@@ -404,7 +404,7 @@ class RichProgressRenderer(ProgressRenderer):
         table = Table(show_header=True, header_style="bold", expand=True, width=table_width)
         stage_width = 16
         status_width = 11
-        progress_width = 17
+        progress_width = 26
         table.add_column("Stage", style="cyan", no_wrap=True, width=stage_width)
         table.add_column("Status", style="white", no_wrap=True, width=status_width)
         table.add_column("Progress", style="blue", no_wrap=True, width=progress_width)
@@ -482,6 +482,25 @@ class RichProgressRenderer(ProgressRenderer):
         download_stage = self._stage_data.get("file_downloads")
         if download_stage and download_stage.total is not None:
             stats_parts.append(f"Downloads: {download_stage.current}/{download_stage.total}")
+            
+            # Add download-specific statistics from details
+            if download_stage.status in (StageStatus.RUNNING, StageStatus.COMPLETED):
+                details = download_stage.details or {}
+                success = details.get('success_count')
+                failed = details.get('failed_count')
+                skipped = details.get('skipped_count')
+                
+                # Build download stats string
+                download_stats = []
+                if success is not None:
+                    download_stats.append(f"✓ {success} ok")
+                if failed is not None:
+                    download_stats.append(f"✗ {failed} fail")
+                if skipped is not None:
+                    download_stats.append(f"⊙ {skipped} skip")
+                
+                if download_stats:
+                    stats_parts.append(" | ".join(download_stats))
 
         if StageStatus.COMPLETED in status_counts:
             stats_parts.append(f"✅ {status_counts[StageStatus.COMPLETED]} completed")
