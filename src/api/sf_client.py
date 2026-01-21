@@ -3,10 +3,14 @@ Salesforce REST API Client
 
 Provides a simple client for interacting with Salesforce REST API
 using authentication credentials from sf CLI.
+
+DEPRECATED: This module is deprecated and will be removed in a future version.
+Use simple-salesforce based implementations instead (see src/download/downloader_simple.py).
 """
 
 import logging
 import os
+import warnings
 import requests
 from pathlib import Path
 
@@ -36,6 +40,13 @@ class SalesforceClient:
             instance_url: Salesforce instance URL (e.g., https://instance.salesforce.com)
             api_version: API version to use (default: 65.0)
         """
+        warnings.warn(
+            "SalesforceClient is deprecated and will be removed in a future version. "
+            "Use simple-salesforce based implementations instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        
         self.access_token = access_token
         self.instance_url = instance_url.rstrip('/')
         self.api_version = api_version

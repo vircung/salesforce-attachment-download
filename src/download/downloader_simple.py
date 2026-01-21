@@ -1,0 +1,383 @@
+"""
+Simple-Salesforce Attachment Downloader
+
+This module provides attachment download functionality using simple-salesforce
+instead of direct REST API calls, for better error handling and consistency.
+"""
+
+import logging
+import os
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+from simple_salesforce.api import Salesforce
+
+from src.api.sf_connection import SalesforceConnectionPool
+from src.api.sf_error_handler import SalesforceErrorHandler
+from src.api.usage_monitor import SalesforceUsageMonitor
+from src.exceptions import SFAuthError, SFAPIError, SFNetworkError
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_CONNECT_TIMEOUT = 10
+DEFAULT_READ_TIMEOUT = 60
+DEFAULT_TMP_DIR_NAME = ".tmp_downloads"
+
+
+def download_attachment_simple_salesforce(
+    attachment_id: str,
+    output_path: Path,
+    sf_client: Salesforce,
+    error_handler: Optional[SalesforceErrorHandler] = None,
+    usage_monitor: Optional[SalesforceUsageMonitor] = None,
+    chunk_size: int = 8192
+) -> int:
+    """
+    Download an attachment file using simple-salesforce.
+
+    Args:
+        attachment_id: Salesforce Attachment ID
+        output_path: Local file path to save downloaded content
+        sf_client: Authenticated simple-salesforce client
+        error_handler: Optional error handler for retry logic
+        usage_monitor: Optional usage monitor for tracking
+        chunk_size: Size of chunks for streaming download
+
+    Returns:
+        Number of bytes downloaded
+
+    Raises:
+        SFAPIError: If download fails
+        SFAuthError: If authentication fails
+        SFNetworkError: If network error occurs
+    """
+    # Track API call start
+    start_time = None
+    if usage_monitor:
+        start_time = usage_monitor.stats.last_call_time or 0
+
+    try:
+        # Use error handler if provided
+        if error_handler:
+            def download_operation():
+                return _download_attachment_internal(attachment_id, output_path, sf_client, chunk_size)
+
+            bytes_downloaded = error_handler.execute_with_retry(download_operation)
+        else:
+            bytes_downloaded = _download_attachment_internal(attachment_id, output_path, sf_client, chunk_size)
+
+        # Track successful API call
+        if usage_monitor:
+            call_time = usage_monitor.stats.last_call_time or 0
+            response_time = call_time - start_time if start_time else None
+            usage_monitor.track_call('download', response_time, success=True)
+
+        return bytes_downloaded
+
+    except Exception as e:
+        # Track failed API call
+        if usage_monitor:
+            call_time = usage_monitor.stats.last_call_time or 0
+            response_time = call_time - start_time if start_time else None
+            usage_monitor.track_call('download', response_time, success=False)
+
+        logger.error(f"Download failed for attachment {attachment_id}: {e}")
+        raise
+
+
+def _download_attachment_internal(
+    attachment_id: str,
+    output_path: Path,
+    sf_client: Salesforce,
+    chunk_size: int = 8192
+) -> int:
+    """
+    Internal download implementation using simple-salesforce.
+
+    Args:
+        attachment_id: Salesforce Attachment ID
+        output_path: Local file path to save downloaded content
+        sf_client: Authenticated simple-salesforce client
+        chunk_size: Size of chunks for streaming download
+
+    Returns:
+        Number of bytes downloaded
+    """
+    logger.debug(f"Downloading attachment: {attachment_id}")
+
+    # Create parent directory if needed
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_dir_path = output_path.parent.parent / DEFAULT_TMP_DIR_NAME
+    temp_dir_path.mkdir(parents=True, exist_ok=True)
+
+    # Download to temporary file first, then atomically replace
+    temp_name = f"{output_path.name}.{attachment_id}.part"
+    temp_path = temp_dir_path / temp_name
+
+    bytes_downloaded = 0
+    try:
+        # Use simple-salesforce to get attachment data
+        # Note: simple-salesforce doesn't have a direct download method,
+        # so we construct the URL and use requests directly
+        attachment_url = f"{sf_client.base_url}sobjects/Attachment/{attachment_id}/Body"
+
+        # Get the attachment data using the session from simple-salesforce
+        response = sf_client.session.get(attachment_url, stream=True)
+
+        # Check for HTTP errors
+        if response.status_code == 404:
+            logger.error(f"Attachment not found: {attachment_id}")
+            raise SFAPIError(f"Attachment {attachment_id} not found (404)")
+
+        if response.status_code in (401, 403):
+            logger.error(f"Authentication failed downloading {attachment_id}: {response.status_code}")
+            raise SFAuthError(f"Authentication failed (HTTP {response.status_code})")
+
+        if response.status_code >= 400:
+            logger.error(f"Service error downloading {attachment_id}: {response.status_code}")
+            raise SFNetworkError(f"Service error (HTTP {response.status_code})")
+
+        response.raise_for_status()
+
+        # Download to temp file
+        with temp_path.open('wb') as f:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:  # Filter out keep-alive chunks
+                    f.write(chunk)
+                    bytes_downloaded += len(chunk)
+
+        # Atomically move to final location
+        os.replace(temp_path, output_path)
+
+        logger.debug(f"Downloaded {bytes_downloaded} bytes to: {output_path.name}")
+        return bytes_downloaded
+
+    finally:
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except OSError:
+            pass
+
+
+def download_attachments_simple_salesforce(
+    metadata_csv: Path,
+    output_dir: Path,
+    org_alias: str,
+    connection_pool: Optional[SalesforceConnectionPool] = None,
+    error_handler: Optional[SalesforceErrorHandler] = None,
+    usage_monitor: Optional[SalesforceUsageMonitor] = None,
+    filter_config=None,
+    progress_stage=None,
+    completed_counter=None
+) -> Dict[str, Any]:
+    """
+    Download all attachments from metadata CSV using simple-salesforce.
+
+    Args:
+        metadata_csv: Path to CSV file with attachment metadata
+        output_dir: Directory to save downloaded files
+        org_alias: Salesforce org alias
+        connection_pool: Optional connection pool for client management
+        error_handler: Optional error handler for retry logic
+        usage_monitor: Optional usage monitor for tracking
+        filter_config: Optional filter configuration (for compatibility)
+        progress_stage: Optional progress tracking stage
+        completed_counter: Optional shared counter for multi-worker progress
+
+    Returns:
+        Dictionary with download statistics
+    """
+    from .metadata import read_metadata_csv
+    from .filename import (
+        DEFAULT_PARENT_ID,
+        sanitize_filename,
+        detect_filename_collisions,
+    )
+    from .stats import DownloadStats
+
+    stats = DownloadStats()
+
+    # Get client from pool or create new one
+    if connection_pool:
+        sf_client = connection_pool.get_connection()
+        try:
+            result = _download_attachments_internal(
+                metadata_csv, output_dir, sf_client, stats,
+                error_handler, usage_monitor, filter_config,
+                progress_stage, completed_counter
+            )
+            return result
+        finally:
+            connection_pool.return_connection(sf_client)
+    else:
+        # Fallback: create client directly
+        from src.api.sf_auth_adapter import SFCLIAuthAdapter
+        adapter = SFCLIAuthAdapter(org_alias)
+        sf_client = adapter.get_client()
+
+        return _download_attachments_internal(
+            metadata_csv, output_dir, sf_client, stats,
+            error_handler, usage_monitor, filter_config,
+            progress_stage, completed_counter
+        )
+
+
+def _download_attachments_internal(
+    metadata_csv: Path,
+    output_dir: Path,
+    sf_client: Salesforce,
+    stats: 'DownloadStats',
+    error_handler: Optional[SalesforceErrorHandler],
+    usage_monitor: Optional[SalesforceUsageMonitor],
+    filter_config,
+    progress_stage,
+    completed_counter
+) -> Dict[str, Any]:
+    """
+    Internal implementation of attachment downloads.
+    """
+    from .metadata import read_metadata_csv
+    from .filename import (
+        DEFAULT_PARENT_ID,
+        sanitize_filename,
+        detect_filename_collisions,
+    )
+    from src.workflows.common import ensure_directories
+
+    try:
+        # Read metadata
+        logger.debug("Reading attachment metadata")
+        attachments = read_metadata_csv(metadata_csv)
+        original_count = len(attachments)
+
+        # Apply filtering if configured
+        if filter_config and hasattr(filter_config, 'has_filters') and filter_config.has_filters() and filter_config.strategy == 'python':
+            logger.debug("Applying ParentId filter")
+            from src.query.filters import apply_parent_id_filter, log_filter_summary
+            attachments = apply_parent_id_filter(attachments, filter_config)
+            log_filter_summary(original_count, len(attachments), filter_config)
+
+            if len(attachments) == 0:
+                logger.warning("No attachments matched the filter criteria. Skipping download phase.")
+                stats.total = 0
+                return stats.to_dict()
+
+        stats.total = len(attachments)
+
+        # Detect filename collisions
+        logger.debug("Analyzing filename collisions")
+        filename_info_map = detect_filename_collisions(attachments)
+        logger.debug(f"Collision analysis complete for {len(attachments)} attachments")
+
+        # Ensure output directory exists
+        ensure_directories(output_dir)
+
+        # Early exit if no attachments
+        if stats.total == 0:
+            logger.info("No attachments to download")
+            return stats.to_dict()
+
+        # Download files
+        logger.info(f"Downloading {stats.total} attachment(s)...")
+
+        for attachment in attachments:
+            attachment_id = attachment['Id']
+            parent_id = attachment.get('ParentId', DEFAULT_PARENT_ID)
+            original_name = attachment['Name']
+
+            filename_info = filename_info_map.get(attachment_id)
+            if filename_info:
+                safe_name = filename_info.safe_name
+                has_collision = filename_info.has_collision
+            else:
+                safe_name = sanitize_filename(original_name)
+                has_collision = False
+
+            if has_collision:
+                output_filename = f"{parent_id}_{attachment_id}_{safe_name}"
+            else:
+                output_filename = f"{parent_id}_{safe_name}"
+
+            output_path = output_dir / output_filename
+
+            try:
+                # Check if file already exists
+                if output_path.exists():
+                    logger.info("  ⊙ Skipped (already exists)")
+                    stats.completed += 1
+                    stats.skipped += 1
+                    result_bytes = 0
+                    status = 'skipped'
+                else:
+                    # Download the file
+                    result_bytes = download_attachment_simple_salesforce(
+                        attachment_id, output_path, sf_client,
+                        error_handler, usage_monitor
+                    )
+                    logger.info("  ✓ Downloaded")
+                    stats.success += 1
+                    status = 'success'
+
+                stats.completed += 1
+                stats.bytes_transferred += result_bytes
+
+                # Update progress
+                if progress_stage:
+                    try:
+                        if completed_counter:
+                            with completed_counter['lock']:
+                                completed_counter['count'] += 1
+                                global_completed = completed_counter['count']
+                        else:
+                            global_completed = stats.completed
+
+                        progress_stage.update_download(
+                            completed_files=global_completed,
+                            current_file=original_name,
+                            success_count=stats.success,
+                            failed_count=stats.failed,
+                            skipped_count=stats.skipped,
+                            bytes_transferred=stats.bytes_transferred
+                        )
+                    except Exception:
+                        pass
+
+            except (SFNetworkError, SFAuthError) as e:
+                logger.error(f"  ✗ Fatal error: {e}")
+                stats.failed += 1
+                stats.completed += 1
+                stats.errors.append({
+                    'id': attachment_id,
+                    'name': original_name,
+                    'error': str(e)
+                })
+                if completed_counter:
+                    with completed_counter['lock']:
+                        completed_counter['count'] += 1
+                raise e
+
+            except SFAPIError as e:
+                logger.error(f"  ✗ Error: {e}")
+                stats.failed += 1
+                stats.completed += 1
+                stats.errors.append({
+                    'id': attachment_id,
+                    'name': original_name,
+                    'error': str(e)
+                })
+                if completed_counter:
+                    with completed_counter['lock']:
+                        completed_counter['count'] += 1
+
+        # Summary
+        logger.info(
+            f"Download complete: {stats.success} downloaded, {stats.skipped} skipped, {stats.failed} failed"
+        )
+
+        return stats.to_dict()
+
+    except Exception as e:
+        logger.error(f"Unexpected error during downloads: {e}")
+        raise

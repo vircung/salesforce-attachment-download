@@ -14,14 +14,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from threading import Lock
 
-from src.constants import CsvRecordInfo, WorkflowPhase
-from src.query.executor import run_query_script_with_filter
-from src.query.filters import ParentIdFilter, build_soql_where_clause
-from src.workflows.common import merge_csv_files, ensure_directories
-from src.progress.stages import SoqlQueryStage
 from src.utils import log_section_header
-from src.exceptions import SFQueryError, SFAuthError, SFAPIError
-from src.workflows.thread_pool import WorkflowThreadPool, WorkerResult
+from src.constants import WorkflowPhase, CsvRecordInfo
+from src.progress.stages import SoqlQueryStage
+from src.workflows.thread_pool import WorkflowThreadPool
+from src.api.sf_connection import SalesforceConnectionPool
+from src.api.sf_error_handler import SalesforceErrorHandler
+from src.api.usage_monitor import SalesforceUsageMonitor
+from src.exceptions import SFQueryError
+from src.workflows.common import ensure_directories, merge_csv_files
+from src.query.filters import ParentIdFilter, build_soql_where_clause
+from src.query.soql_simple import query_attachments_with_simple_salesforce
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +55,10 @@ def execute_all_csv_queries(
     org_alias: str,
     output_dir: Path,
     soql_stage: SoqlQueryStage,
-    thread_pool: WorkflowThreadPool
+    thread_pool: WorkflowThreadPool,
+    connection_pool: SalesforceConnectionPool,
+    error_handler: SalesforceErrorHandler,
+    usage_monitor: SalesforceUsageMonitor
 ) -> List[QueryResult]:
     """
     Execute queries for ALL CSVs sequentially.
@@ -104,7 +110,10 @@ def execute_all_csv_queries(
         org_alias=org_alias,
         output_dir=output_dir,
         soql_stage=soql_stage,
-        thread_pool=thread_pool
+        thread_pool=thread_pool,
+        connection_pool=connection_pool,
+        error_handler=error_handler,
+        usage_monitor=usage_monitor
     )
 
 
@@ -113,7 +122,10 @@ def execute_all_batches_threaded(
     org_alias: str,
     output_dir: Path,
     soql_stage: SoqlQueryStage,
-    thread_pool: WorkflowThreadPool
+    thread_pool: WorkflowThreadPool,
+    connection_pool: SalesforceConnectionPool,
+    error_handler: SalesforceErrorHandler,
+    usage_monitor: SalesforceUsageMonitor
 ) -> List[QueryResult]:
     """
     Execute all batch queries for ALL CSVs using threading.
@@ -175,7 +187,10 @@ def execute_all_batches_threaded(
                     metadata_output_dir,
                     cumulative_batch_num + batch_idx + 1,
                     soql_stage,
-                    completed_counter
+                    completed_counter,
+                    connection_pool,
+                    error_handler,
+                    usage_monitor
                 )
             )
         cumulative_batch_num += csv_info.total_batches
@@ -242,7 +257,10 @@ def _execute_single_batch(
     metadata_output_dir: Path,
     cumulative_batch_num: int,
     soql_stage: SoqlQueryStage,
-    completed_counter: dict
+    completed_counter: dict,
+    connection_pool: SalesforceConnectionPool,
+    error_handler: SalesforceErrorHandler,
+    usage_monitor: SalesforceUsageMonitor
 ) -> QueryBatchResult:
     """
     Execute a single batch query in a worker thread.
@@ -279,11 +297,14 @@ def _execute_single_batch(
     )
     where_clause = build_soql_where_clause(filter_config)
     
-    # Execute query
-    batch_csv_path = run_query_script_with_filter(
+    # Execute query using simple-salesforce
+    batch_csv_path = query_attachments_with_simple_salesforce(
         org_alias=org_alias,
         output_dir=metadata_output_dir,
-        where_clause=where_clause
+        where_clause=where_clause,
+        connection_pool=connection_pool,
+        error_handler=error_handler,
+        usage_monitor=usage_monitor
     )
     
     # Count results

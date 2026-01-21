@@ -7,16 +7,18 @@ Manages temp directory lifecycle and executes downloads for all attachment metad
 
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from threading import Lock
 
-# from src.download.downloader import download_attachments  # Moved to function scope to avoid circular import
-from src.progress.stages import DownloadStage
 from src.utils import log_section_header
-from src.exceptions import SFAPIError
-from src.workflows.thread_pool import WorkflowThreadPool
 from src.constants import WorkflowPhase
+from src.progress.stages import DownloadStage
+from src.workflows.thread_pool import WorkflowThreadPool
+from src.api.sf_connection import SalesforceConnectionPool
+from src.api.sf_error_handler import SalesforceErrorHandler
+from src.api.usage_monitor import SalesforceUsageMonitor
+from src.exceptions import SFAPIError
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,10 @@ def coordinate_all_downloads(
     output_dir: Path,
     download_stage: DownloadStage,
     thread_pool: WorkflowThreadPool,
-    download_enabled: bool = True
+    download_enabled: bool = True,
+    connection_pool: Optional[SalesforceConnectionPool] = None,
+    error_handler: Optional[SalesforceErrorHandler] = None,
+    usage_monitor: Optional[SalesforceUsageMonitor] = None
 ) -> List[DownloadResult]:
     """
     Coordinate download of all attachments across all CSVs.
@@ -116,17 +121,20 @@ def coordinate_all_downloads(
     }
     
     # Submit all CSV downloads to thread pool
-    from src.download.downloader import download_attachments  # Lazy import to avoid circular dependency
+    from src.download.downloader_simple import download_attachments_simple_salesforce  # Lazy import to avoid circular dependency
     for query_result in query_results:
         csv_files_dir = output_dir / query_result.csv_name / 'files'
         
         thread_pool.submit_task(
             task_id=f"download_{query_result.csv_name}",
-            fn=download_attachments,
+            fn=download_attachments_simple_salesforce,
             args=(
                 query_result.merged_csv_path,      # metadata_csv
                 csv_files_dir,                      # output_dir
                 org_alias,                          # org_alias
+                connection_pool,                    # connection_pool
+                error_handler,                      # error_handler
+                usage_monitor,                      # usage_monitor
                 None,                               # filter_config
                 download_stage,                     # progress_stage
                 completed_counter                   # shared counter for global progress tracking

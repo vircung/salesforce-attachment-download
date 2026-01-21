@@ -24,9 +24,15 @@ from src.workflows.csv_coordinator import coordinate_csv_processing
 from src.workflows.query_coordinator import execute_all_csv_queries
 # from src.workflows.download_coordinator import coordinate_all_downloads, DownloadResult  # Moved to function scope to avoid circular import
 
-# Support modules
-from src.workflows.directory_manager import create_csv_directories
+from src.api.sf_connection import SalesforceConnectionPool
+from src.api.sf_error_handler import SalesforceErrorHandler
+from src.api.usage_monitor import SalesforceUsageMonitor
+
+# Error handlers
 from src.workflows.error_handler import WorkflowErrorHandler
+
+# Directory management
+from src.workflows.directory_manager import create_csv_directories
 
 # Thread pool support
 from src.workflows.thread_pool import ThreadPoolConfig, WorkflowThreadPool
@@ -109,8 +115,19 @@ def process(
             progress_tracker.add_stage(soql_stage)
             progress_tracker.add_stage(download_stage)
         
-        # Initialize error handler
-        error_handler = WorkflowErrorHandler(csv_stage, soql_stage, download_stage)
+        # Initialize error handlers
+        workflow_error_handler = WorkflowErrorHandler(
+            csv_stage=csv_stage,
+            soql_stage=soql_stage,
+            download_stage=download_stage
+        )
+        
+        # Initialize Salesforce components
+        connection_pool = SalesforceConnectionPool(org_alias=org_alias, workers=workers)
+        error_handler = SalesforceErrorHandler()
+        usage_monitor = SalesforceUsageMonitor()
+        
+        logger.debug(f"Initialized Salesforce components: pool_size={connection_pool.pool_size}")
         
         # Create thread pool configuration and context manager
         thread_pool_config = ThreadPoolConfig(query_workers=workers)
@@ -138,7 +155,7 @@ def process(
             # Mark CSV stage as completed after Phase 1
             csv_stage.complete(f"Processed {len(csv_records)} CSV files")
         except Exception as e:
-            error_handler.handle_csv_error("csv_discovery", e)
+            workflow_error_handler.handle_csv_error("csv_discovery", e)
             raise
         
         # ============================================================
@@ -152,7 +169,10 @@ def process(
                     org_alias=org_alias,
                     output_dir=output_dir,
                     soql_stage=soql_stage,
-                    thread_pool=thread_pool
+                    thread_pool=thread_pool,
+                    connection_pool=connection_pool,
+                    error_handler=error_handler,
+                    usage_monitor=usage_monitor
                 )
                 
                 # Pre-populate Download stage total for Phase 3
@@ -173,10 +193,13 @@ def process(
                     output_dir=output_dir,
                     download_stage=download_stage,
                     thread_pool=thread_pool,
-                    download_enabled=download
+                    download_enabled=download,
+                    connection_pool=connection_pool,
+                    error_handler=error_handler,
+                    usage_monitor=usage_monitor
                 )
         except Exception as e:
-            error_handler.handle_query_error("all_queries", e)
+            workflow_error_handler.handle_query_error("all_queries", e)
             raise
         
         # ============================================================
