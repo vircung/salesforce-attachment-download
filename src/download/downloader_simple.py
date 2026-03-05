@@ -5,10 +5,11 @@ This module provides attachment download functionality using simple-salesforce
 instead of direct REST API calls, for better error handling and consistency.
 """
 
+import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from simple_salesforce.api import Salesforce
 
@@ -22,6 +23,62 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONNECT_TIMEOUT = 10
 DEFAULT_READ_TIMEOUT = 60
 DEFAULT_TMP_DIR_NAME = ".tmp_downloads"
+
+
+def _write_skipped_files_report(
+    os_errors: List[Dict[str, Any]],
+    output_dir: Path,
+    sf_client: Salesforce
+) -> None:
+    """Write a JSON report of files skipped due to OS errors (e.g. filename too long).
+
+    Written to the top-level output/ directory so it aggregates across all objects.
+    Includes a manual download URL for each file so the user can retrieve them.
+    """
+    # output_dir is e.g. output/ObjectName/files/ — go up to output/
+    report_dir = output_dir
+    for _ in range(3):
+        if report_dir.name == 'output':
+            break
+        report_dir = report_dir.parent
+    report_path = report_dir / "skipped_files.json"
+
+    instance_url = sf_client.sf_instance if hasattr(sf_client, 'sf_instance') else ''
+    if instance_url and not instance_url.startswith('https://'):
+        instance_url = f"https://{instance_url}"
+
+    # Load existing report if present (multiple objects may append)
+    existing_entries = []
+    if report_path.exists():
+        try:
+            with open(report_path, 'r', encoding='utf-8') as f:
+                existing_entries = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing_entries = []
+
+    new_entries = []
+    for err in os_errors:
+        attachment_id = err.get('id', '')
+        new_entries.append({
+            'attachment_id': attachment_id,
+            'parent_id': err.get('parent_id', ''),
+            'original_name': err.get('name', ''),
+            'error': err.get('error', ''),
+            'manual_download_url': f"{instance_url}/servlet/servlet.FileDownload?file={attachment_id}" if instance_url else '',
+        })
+
+    all_entries = existing_entries + new_entries
+
+    try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(all_entries, f, indent=2, ensure_ascii=False)
+
+        logger.warning(
+            f"Wrote skipped files report ({len(new_entries)} new, {len(all_entries)} total): {report_path}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to write skipped files report: {e}")
 
 
 def download_attachment_simple_salesforce(
@@ -370,6 +427,29 @@ def _download_attachments_internal(
                 if completed_counter:
                     with completed_counter['lock']:
                         completed_counter['count'] += 1
+
+            except OSError as e:
+                logger.warning(
+                    f"  ✗ OS error for attachment {attachment_id} "
+                    f"('{original_name}'): {e} — skipping file"
+                )
+                stats.failed += 1
+                stats.completed += 1
+                stats.errors.append({
+                    'id': attachment_id,
+                    'parent_id': parent_id,
+                    'name': original_name,
+                    'error': str(e),
+                    'error_type': 'OSError'
+                })
+                if completed_counter:
+                    with completed_counter['lock']:
+                        completed_counter['count'] += 1
+
+        # Generate skipped-files report for OS errors (e.g. filename too long)
+        os_errors = [e for e in stats.errors if e.get('error_type') == 'OSError']
+        if os_errors:
+            _write_skipped_files_report(os_errors, output_dir, sf_client)
 
         # Summary
         logger.info(

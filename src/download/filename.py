@@ -6,8 +6,11 @@ including sanitization and collision detection.
 """
 
 import logging
+import os
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Dict, Tuple
 
 logger = logging.getLogger(__name__)
@@ -102,3 +105,56 @@ def detect_filename_collisions(
         logger.info("No filename collisions detected")
 
     return result
+
+
+def get_fs_name_max(path: Path) -> int:
+    """Get the maximum filename length for the filesystem at the given path.
+
+    On Linux (ext4) this is typically 255 bytes.
+    On Windows (NTFS) this is 255 characters.
+    Falls back to 255 if detection fails.
+    """
+    try:
+        if sys.platform == 'win32':
+            # NTFS counts UTF-16 characters, effectively 255 chars
+            return 255
+        else:
+            # Linux/macOS: use os.pathconf for the actual FS limit
+            dir_path = str(path if path.is_dir() else path.parent)
+            return os.pathconf(dir_path, 'PC_NAME_MAX')
+    except (OSError, ValueError):
+        return 255
+
+
+def check_filename_length(filepath: Path, attachment_id: str = '') -> bool:
+    """Check if a filename (including temp suffix) fits within the FS limit.
+
+    On Linux, ext4 counts bytes (UTF-8), so multi-byte characters reduce
+    the effective character limit. The temp file adds '.{attachment_id}.part'
+    to the name, which must also fit.
+
+    Returns True if the name fits, False if it would exceed the limit.
+    Logs a warning when the name is too long.
+    """
+    name = filepath.name
+    # The downloader creates a temp file with this suffix
+    temp_suffix = f".{attachment_id}.part" if attachment_id else ".part"
+    temp_name = f"{name}{temp_suffix}"
+
+    name_max = get_fs_name_max(filepath)
+
+    if sys.platform == 'win32':
+        # NTFS: count characters
+        name_len = len(temp_name)
+    else:
+        # ext4/APFS: count bytes
+        name_len = len(temp_name.encode('utf-8'))
+
+    if name_len > name_max:
+        logger.warning(
+            f"Filename too long ({name_len} > {name_max}): "
+            f"attachment {attachment_id}, name '{name[:80]}...'"
+        )
+        return False
+
+    return True

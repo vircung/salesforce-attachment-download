@@ -150,6 +150,11 @@ class SalesforceErrorHandler:
                 )
                 time.sleep(delay)
 
+            except OSError as e:
+                # Deterministic OS errors (e.g. filename too long) should not be retried
+                logger.error(f"OS error (not retryable): {e}")
+                raise
+
             except Exception as e:
                 # Non-Salesforce errors (network issues, etc.)
                 last_error = e
