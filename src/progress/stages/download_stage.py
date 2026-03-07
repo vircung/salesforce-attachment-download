@@ -46,6 +46,18 @@ class DownloadStage(WorkflowStage):
             message=f"Starting download of {total_files} files"
         )
 
+    def adjust_total(self, skip_delta: int):
+        """Reduce total by skip_delta after pre-scan identified already-downloaded files.
+
+        Thread-safe: uses inherited _lock (RLock). Operates on delta, not absolute value,
+        so multiple workers can call this concurrently.
+        """
+        with self._lock:
+            if self._total_files is not None:
+                self._total_files = max(0, self._total_files - skip_delta)
+                self._progress.total = self._total_files
+        self._notify_callbacks()
+
     def update_download(
         self,
         completed_files: int,

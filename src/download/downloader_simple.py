@@ -67,7 +67,16 @@ def _write_skipped_files_report(
             'manual_download_url': f"{instance_url}/servlet/servlet.FileDownload?file={attachment_id}" if instance_url else '',
         })
 
-    all_entries = existing_entries + new_entries
+    # Deduplicate by attachment_id
+    merged = existing_entries + new_entries
+    seen_ids = set()
+    all_entries = []
+    for entry in merged:
+        aid = entry.get('attachment_id', '')
+        if aid and aid in seen_ids:
+            continue
+        seen_ids.add(aid)
+        all_entries.append(entry)
 
     try:
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +258,6 @@ def download_attachments_simple_salesforce(
     from .metadata import read_metadata_csv
     from .filename import (
         DEFAULT_PARENT_ID,
-        sanitize_filename,
         detect_filename_collisions,
     )
     from .stats import DownloadStats
@@ -298,13 +306,14 @@ def _download_attachments_internal(
     from .metadata import read_metadata_csv
     from .filename import (
         DEFAULT_PARENT_ID,
-        sanitize_filename,
         detect_filename_collisions,
+        build_output_filename,
     )
+    from .scan import scan_existing_files, load_skipped_attachment_ids
     from src.workflows.common import ensure_directories
 
     try:
-        # Read metadata
+        # 1. Read metadata
         logger.debug("Reading attachment metadata")
         attachments = read_metadata_csv(metadata_csv)
         original_count = len(attachments)
@@ -321,9 +330,7 @@ def _download_attachments_internal(
                 stats.total = 0
                 return stats.to_dict()
 
-        stats.total = len(attachments)
-
-        # Detect filename collisions
+        # 2. Detect filename collisions
         logger.debug("Analyzing filename collisions")
         filename_info_map = detect_filename_collisions(attachments)
         logger.debug(f"Collision analysis complete for {len(attachments)} attachments")
@@ -332,51 +339,71 @@ def _download_attachments_internal(
         ensure_directories(output_dir)
 
         # Early exit if no attachments
-        if stats.total == 0:
+        if len(attachments) == 0:
+            stats.total = 0
             logger.info("No attachments to download")
             return stats.to_dict()
 
-        # Download files
-        logger.info(f"Downloading {stats.total} attachment(s)...")
+        # 3. Scan existing files on disk
+        existing_filenames = scan_existing_files(output_dir)
+
+        # 4. Load permanently-skipped attachment IDs
+        skipped_ids = load_skipped_attachment_ids(output_dir)
+
+        # 5-6. Build filenames and split into to_download vs skipped
+        to_download = []
+        skipped_existing = 0
+        skipped_permanent = 0
 
         for attachment in attachments:
             attachment_id = attachment['Id']
+            output_filename = build_output_filename(attachment, filename_info_map)
+
+            if output_filename in existing_filenames:
+                skipped_existing += 1
+            elif attachment_id in skipped_ids:
+                skipped_permanent += 1
+            else:
+                to_download.append(attachment)
+
+        total_skipped = skipped_existing + skipped_permanent
+        stats.skipped = total_skipped
+        stats.total = len(to_download)
+
+        logger.info(
+            "Scan: %d existing, %d permanently skipped, %d to download (of %d total)",
+            skipped_existing, skipped_permanent, len(to_download), len(attachments)
+        )
+
+        # 7. Adjust progress total
+        if progress_stage and total_skipped > 0:
+            try:
+                progress_stage.adjust_total(total_skipped)
+            except Exception:
+                pass
+
+        # Early exit if everything is already downloaded
+        if not to_download:
+            logger.info("All attachments already downloaded")
+            return stats.to_dict()
+
+        # 8. Download loop — only files that need downloading
+        logger.info(f"Downloading {len(to_download)} attachment(s)...")
+
+        for attachment in to_download:
+            attachment_id = attachment['Id']
             parent_id = attachment.get('ParentId', DEFAULT_PARENT_ID)
             original_name = attachment['Name']
-
-            filename_info = filename_info_map.get(attachment_id)
-            if filename_info:
-                safe_name = filename_info.safe_name
-                has_collision = filename_info.has_collision
-            else:
-                safe_name = sanitize_filename(original_name)
-                has_collision = False
-
-            if has_collision:
-                output_filename = f"{parent_id}_{attachment_id}_{safe_name}"
-            else:
-                output_filename = f"{parent_id}_{safe_name}"
-
+            output_filename = build_output_filename(attachment, filename_info_map)
             output_path = output_dir / output_filename
 
             try:
-                # Check if file already exists
-                if output_path.exists():
-                    logger.info("  ⊙ Skipped (already exists)")
-                    stats.completed += 1
-                    stats.skipped += 1
-                    result_bytes = 0
-                    status = 'skipped'
-                else:
-                    # Download the file
-                    result_bytes = download_attachment_simple_salesforce(
-                        attachment_id, output_path, sf_client,
-                        error_handler, usage_monitor
-                    )
-                    logger.info("  ✓ Downloaded")
-                    stats.success += 1
-                    status = 'success'
-
+                result_bytes = download_attachment_simple_salesforce(
+                    attachment_id, output_path, sf_client,
+                    error_handler, usage_monitor
+                )
+                logger.info("  ✓ Downloaded")
+                stats.success += 1
                 stats.completed += 1
                 stats.bytes_transferred += result_bytes
 

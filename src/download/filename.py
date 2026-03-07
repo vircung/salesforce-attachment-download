@@ -158,3 +158,29 @@ def check_filename_length(filepath: Path, attachment_id: str = '') -> bool:
         return False
 
     return True
+
+
+def build_output_filename(
+    attachment: Dict[str, str],
+    filename_info_map: Dict[str, 'FilenameInfo']
+) -> str:
+    """Build the output filename for an attachment.
+
+    Uses {parent_id}_{safe_name} normally,
+    or {parent_id}_{attachment_id}_{safe_name} when a collision is detected.
+    """
+    attachment_id = attachment['Id']
+    parent_id = attachment.get('ParentId', DEFAULT_PARENT_ID)
+
+    filename_info = filename_info_map.get(attachment_id)
+    if filename_info:
+        safe_name = filename_info.safe_name
+        has_collision = filename_info.has_collision
+    else:
+        safe_name = sanitize_filename(attachment.get('Name', 'unnamed'))
+        has_collision = False
+
+    if has_collision:
+        return f"{parent_id}_{attachment_id}_{safe_name}"
+    else:
+        return f"{parent_id}_{safe_name}"

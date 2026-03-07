@@ -4,10 +4,10 @@ node = "lts"
 "npm:@salesforce/cli" = "latest"
 
 [tasks.install]
-description = "Instalacja zależności Python"
-run = "pip install -r requirements.txt"
+description = "Install Python dependencies"
+run = "python -m ensurepip --upgrade > /dev/null 2>&1 && python -m pip install -q -r requirements.txt"
 
-[tasks.run]
+[tasks.download]
 description = "Uruchomienie pobierania załączników Salesforce (konfiguracja z .env)"
 run = "python main.py"
 
