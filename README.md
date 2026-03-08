@@ -1,7 +1,7 @@
 # Salesforce Attachments Downloader
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+![Python](https://img.shields.io/badge/python-3.14-blue.svg)
 
 A Python CLI tool for downloading Salesforce Attachment records and files using CSV-based record processing.
 
@@ -9,17 +9,18 @@ A Python CLI tool for downloading Salesforce Attachment records and files using 
 
 - Query Attachment records using Salesforce CLI authentication with WHERE clause filtering
 - Process CSV files containing record IDs to download attachments
-- Export metadata to CSV with comprehensive validation and enrichment
-- Download attachment files via REST API with intelligent retry logic
+- In-memory pipeline — SOQL results stay in memory, no intermediate CSV files
+- Per-batch download parallelism within each object
+- Resume support — skip already-downloaded files on restart
+- Atomic file writes (`.part` temp files + `os.replace()`) — no corrupted downloads
+- Graceful handling of OS errors (e.g. filenames exceeding filesystem limits)
+- `skipped_files.json` report with manual download URLs for permanently failed files
 - Reuse sf CLI authentication (no separate OAuth setup required)
 - Rich progress display with auto-detected renderer (Rich or tqdm)
 - Advanced error handling with exponential backoff and connection pooling
 - Flexible configuration via CLI arguments or .env file
 - Intelligent filename collision detection using ParentId prefix
-- **NEW:** Simple-Salesforce integration for improved performance and reliability
-- **NEW:** Connection pooling for optimal API usage
-- **NEW:** Enhanced monitoring and health checks
-- **NEW:** Field discovery and metadata validation
+- Optional `--save-metadata` flag to write SOQL result CSVs for audit/debug
 
 ## Migration Guide
 
@@ -181,11 +182,12 @@ python main.py --org your-org --records-dir ./records --output ./output
 
 ### Threading Architecture
 
-The tool now supports parallel processing for both SOQL queries (Phase 2) and file downloads (Phase 3) to significantly improve performance. All batches/CSVs are submitted to a thread pool simultaneously, allowing multiple queries and downloads to run concurrently.
+The tool uses parallel processing for both SOQL queries (Phase 2) and file downloads (Phase 3).
 
+- **Phase 2 (queries)**: All batches from all CSVs submitted to thread pool simultaneously
+- **Phase 3 (downloads)**: Objects processed sequentially, batches within each object downloaded in parallel
 - **Conservative defaults**: 2 workers by default to avoid overwhelming the Salesforce API
-- **Performance benefits**: With 4 workers and 10 CSVs, expect 3-4x faster processing compared to sequential execution
-- **Symmetric parallelism**: The same worker pool handles both queries and downloads
+- **Connection pool**: Each download worker borrows a connection from `SalesforceConnectionPool` via `get_connection()`/`return_connection()`
 
 ### Configuration
 
@@ -230,9 +232,11 @@ python main.py --org your-org --records-dir ./records
 
 ```
 output/
+├── skipped_files.json              # (if any OS errors occurred)
 └── csv_name_1/
-    ├── metadata/
-    │   └── attachments_20260114_120000_merged.csv
+    ├── metadata/                   # (only with --save-metadata)
+    │   ├── batch_0_20260114_120000.csv
+    │   └── batch_1_20260114_120001.csv
     └── files/
         ├── a3xAAA111_invoice.pdf
         ├── a3xAAA111_receipt.pdf
@@ -240,8 +244,8 @@ output/
 ```
 
 Each CSV file gets its own subfolder containing:
-- `metadata/` with merged query results
 - `files/` with downloaded attachment binaries
+- `metadata/` with per-batch SOQL result CSVs (only when `--save-metadata` is used)
 
 **Filename Convention:**
 - Default format: `{ParentId}_{original_filename}`
@@ -311,6 +315,8 @@ The tool supports loading configuration from a `.env` file in the project root d
 | `VERBOSE` | Enable verbose console output (INFO level) | `false` | `--verbose` |
 | `DEBUG` | Enable debug console output (DEBUG level) | `false` | `--debug` |
 | `PROGRESS` | Progress display mode: `auto`, `on`, `off`, `tqdm` | `auto` | `--progress` |
+
+Note: `--save-metadata` is CLI-only (no `.env` variable). It writes per-batch SOQL result CSVs to `metadata/` subdirectories for audit/debug purposes.
 
 **Configuration Precedence:**
 
@@ -467,10 +473,9 @@ The tool gracefully handles errors and provides clear error messages:
 - Invalid SOQL syntax
 - Insufficient permissions
 
-Threading uses automatic retry logic (up to 3 attempts per batch/download). If you see many retry messages, consider using `--sync-only` to reduce API load.
+SOQL query tasks use automatic retry logic (up to 3 attempts per batch). Download tasks use a single attempt (`max_retries=1`) with no timeout — failed downloads are counted and reported, and will be retried on the next run via resume.
 
-Per-file download failures are best-effort and summarized at the end of the workflow.
-Fatal authentication errors or network/service failures will stop the workflow.
+Per-file OS errors (e.g. filename too long) are caught, logged, and recorded in `skipped_files.json` with manual download URLs. Fatal authentication or network errors are re-raised and stop the workflow.
 
 ### Partial Downloads
 
@@ -488,6 +493,7 @@ To avoid treating partial files as complete, downloads are written to a temporar
 --batch-size        Number of ParentIds per SOQL query batch (default: 100)
 --workers           Parallel workers for queries and downloads (default: 2, max: 8)
 --sync-only         Disable threading, run sequentially (default: disabled, use for debugging)
+--save-metadata     Write SOQL result batch CSVs to disk for audit/debug (default: off)
 --progress          Progress display mode: auto, on, off, tqdm
 --verbose           Enable verbose console output (INFO level)
 --debug             Enable debug console output (DEBUG level with technical details)
@@ -495,8 +501,6 @@ To avoid treating partial files as complete, downloads are written to a temporar
 
 ## Current Limitations
 
-- Concurrency is isolated within each bucket; CSV processing remains sequential
-- No resume capability for interrupted sessions
 - Support limited to Attachment object (ContentDocument not yet supported)
 - Batch size constrained by SOQL WHERE clause character limits
 - Progress display requires `rich` or `tqdm` (falls back to basic logging if unavailable)
@@ -596,7 +600,7 @@ python main.py
 ## Project Structure
 
 ```
-attachments-extract/
+salesforce-attachment-download/
 ├── main.py                      # Main entry point
 ├── requirements.txt             # Python dependencies
 ├── .gitignore                   # Git ignore file
@@ -604,19 +608,18 @@ attachments-extract/
 ├── README.md                    # This file
 ├── src/
 │   ├── __init__.py
+│   ├── models.py               # Data models (AttachmentRecord, BatchResult, ObjectQueryResult)
 │   ├── exceptions.py           # Custom exceptions
 │   ├── utils.py                # Logging utilities
 │   ├── workflows/
-│   │   ├── __init__.py         # Package exports
-│   │   ├── orchestrator.py     # Three-phase workflow orchestration (main entry point)
+│   │   ├── orchestrator.py     # Three-phase workflow orchestration
 │   │   ├── csv_coordinator.py  # Phase 1: CSV discovery & processing
-│   │   ├── query_coordinator.py # Phase 2: SOQL batch querying
-│   │   ├── download_coordinator.py # Phase 3: File downloads
+│   │   ├── query_coordinator.py # Phase 2: SOQL batch querying (in-memory results)
+│   │   ├── download_coordinator.py # Phase 3: Per-batch parallel downloads
+│   │   ├── thread_pool.py      # Thread pool with retry logic
 │   │   ├── error_handler.py    # Centralized error handling
-│   │   ├── statistics.py       # Statistics aggregation
 │   │   ├── directory_manager.py # Directory structure management
-│   │   ├── common.py           # Shared workflow utilities
-│   │   └── processor.py        # Legacy workflow (kept as backup)
+│   │   └── common.py           # Shared utilities (ensure_directories)
 │   ├── csv/
 │   │   ├── processor.py        # CSV file processing
 │   │   ├── validator.py        # CSV validation
@@ -627,27 +630,22 @@ attachments-extract/
 │   │   ├── soql_simple.py      # Simple-salesforce SOQL queries
 │   │   └── filters.py          # WHERE clause building
 │   ├── download/
-│   │   ├── downloader.py       # Download orchestration (deprecated)
-│   │   ├── downloader_simple.py # Simple-salesforce downloads
-│   │   ├── metadata.py         # Metadata CSV reading
-│   │   ├── filename.py         # Filename collision detection
+│   │   ├── downloader_simple.py # Per-batch and single-file download functions
+│   │   ├── filename.py         # Filename sanitization and collision detection
+│   │   ├── scan.py             # Pre-download scan and skipped-files management
 │   │   └── stats.py            # Download statistics
 │   ├── api/
 │   │   ├── sf_auth.py          # SF CLI authentication
-│   │   ├── sf_client.py        # REST API client (deprecated - use simple-salesforce)
-│   │   ├── sf_connection.py    # Connection pool for simple-salesforce
-│   │   ├── sf_error_handler.py # Advanced error handling with retries
-│   │   ├── usage_monitor.py    # API usage tracking and metrics
+│   │   ├── sf_client.py        # REST API client (deprecated)
+│   │   ├── sf_connection.py    # Connection pool with instance_url
+│   │   ├── sf_error_handler.py # Error handling with retries
+│   │   ├── usage_monitor.py    # API usage tracking
 │   │   ├── sf_auth_adapter.py  # Hybrid authentication adapter
-│   │   ├── field_discovery.py  # Describe API field discovery
-│   │   ├── health_checker.py   # Health checks and diagnostics
-│   │   └── benchmarker.py      # Performance benchmarking suite
+│   │   └── field_discovery.py  # Describe API field discovery
 │   └── cli/
 │       └── config.py           # CLI argument parsing
 ├── records/                     # CSV files with record IDs (user-provided)
-├── output/
-│   ├── metadata/               # CSV files with attachment metadata
-│   └── files/                  # Downloaded attachments
+├── output/                      # Downloaded attachments (per-CSV subdirectories)
 └── logs/
     └── download.log            # Execution logs
 ```
