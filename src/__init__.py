@@ -23,7 +23,7 @@ from src.csv.validator import validate_metadata_csv
 # from src.download.downloader import download_attachments  # Removed to avoid circular import - import directly when needed
 from src.download.stats import DownloadStats
 from src.download.filename import FilenameInfo, sanitize_filename, detect_filename_collisions
-from src.download.metadata import read_metadata_csv
+
 
 # Workflows
 # from src.workflows.orchestrator import process  # Removed to avoid circular import - import directly when needed
@@ -61,7 +61,7 @@ __all__ = [
     "FilenameInfo",
     "sanitize_filename",
     "detect_filename_collisions",
-    "read_metadata_csv",
+
     # Workflows
     # "process",  # Removed to avoid circular import
     # CLI

@@ -68,7 +68,8 @@ def main():
                 batch_size=args.batch_size,
                 download=True,
                 progress_tracker=progress_tracker,
-                workers=args.workers
+                workers=args.workers,
+                save_metadata=args.save_metadata,
             )
 
 

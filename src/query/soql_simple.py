@@ -18,6 +18,7 @@ from src.api.sf_connection import SalesforceConnectionPool
 from src.api.sf_error_handler import SalesforceErrorHandler
 from src.api.usage_monitor import SalesforceUsageMonitor
 from src.exceptions import SFQueryError
+from src.models import AttachmentRecord
 
 logger = logging.getLogger(__name__)
 
@@ -60,22 +61,20 @@ def build_attachment_query(where_clause: str) -> str:
 def execute_soql_query_simple_salesforce(
     sf_client: Salesforce,
     query: str,
-    output_file: Path,
     error_handler: Optional[SalesforceErrorHandler] = None,
     usage_monitor: Optional[SalesforceUsageMonitor] = None
-) -> int:
+) -> List[Dict[str, Any]]:
     """
-    Execute SOQL query using simple-salesforce and save results to CSV.
+    Execute SOQL query using simple-salesforce and return raw records.
 
     Args:
         sf_client: Authenticated simple-salesforce client
         query: Complete SOQL query string
-        output_file: Path where CSV results will be saved
         error_handler: Optional error handler for retry logic
         usage_monitor: Optional usage monitor for tracking
 
     Returns:
-        Number of records returned
+        List of record dictionaries from Salesforce
 
     Raises:
         SFQueryError: If query execution fails
@@ -92,9 +91,6 @@ def execute_soql_query_simple_salesforce(
     
     # Always log execution progress
     logger.debug("Executing query batch")
-    
-    # Ensure output directory exists
-    output_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Track API call start
     start_time = None
@@ -120,16 +116,9 @@ def execute_soql_query_simple_salesforce(
         records = result['records']
         total_size = int(result['totalSize'])
 
-        logger.info(f"✓ Query successful: {total_size} records retrieved")
+        logger.info(f"Query successful: {total_size} records retrieved")
 
-        # Write results to CSV
-        if records:
-            _write_records_to_csv(records, output_file)
-        else:
-            # Create empty CSV with headers
-            _write_empty_csv(output_file)
-
-        return total_size
+        return records
 
     except Exception as e:
         # Track failed API call
@@ -181,30 +170,49 @@ def _write_empty_csv(output_file: Path) -> None:
         writer.writerow(ATTACHMENT_FIELDS)
 
 
+def _records_to_attachment_records(records: List[Dict[str, Any]]) -> List[AttachmentRecord]:
+    """Convert raw Salesforce record dicts to AttachmentRecord instances."""
+    result = []
+    for record in records:
+        result.append(AttachmentRecord(
+            id=record.get('Id', ''),
+            name=record.get('Name', ''),
+            content_type=record.get('ContentType', ''),
+            body_length=int(record.get('BodyLength', 0)),
+            parent_id=record.get('ParentId', ''),
+            created_date=record.get('CreatedDate', ''),
+            last_modified_date=record.get('LastModifiedDate', ''),
+            description=record.get('Description', '') or '',
+        ))
+    return result
+
+
 def query_attachments_with_simple_salesforce(
     org_alias: str,
-    output_dir: Path,
     where_clause: str,
     connection_pool: Optional[SalesforceConnectionPool] = None,
     error_handler: Optional[SalesforceErrorHandler] = None,
-    usage_monitor: Optional[SalesforceUsageMonitor] = None
-) -> Path:
+    usage_monitor: Optional[SalesforceUsageMonitor] = None,
+    save_metadata: bool = False,
+    metadata_csv_path: Optional[Path] = None,
+) -> List[AttachmentRecord]:
     """
     Query Attachment records with WHERE clause filter using simple-salesforce.
 
-    This function combines building the query, generating a timestamped filename,
-    and executing the query using simple-salesforce instead of sf CLI.
+    Returns in-memory AttachmentRecord list. Optionally writes CSV when
+    save_metadata=True and metadata_csv_path is provided.
 
     Args:
         org_alias: Salesforce org alias
-        output_dir: Directory to save CSV file
         where_clause: WHERE clause (e.g., "WHERE ParentId IN ('id1','id2')")
         connection_pool: Optional connection pool for client management
         error_handler: Optional error handler for retry logic
         usage_monitor: Optional usage monitor for tracking
+        save_metadata: If True, write results to CSV
+        metadata_csv_path: Path for metadata CSV (required when save_metadata=True)
 
     Returns:
-        Path to the generated CSV file
+        List of AttachmentRecord instances
 
     Raises:
         SFQueryError: If query fails
@@ -213,18 +221,13 @@ def query_attachments_with_simple_salesforce(
     # Build SOQL query
     query = build_attachment_query(where_clause)
 
-    # Generate timestamped filename
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_file = output_dir / f'attachments_{timestamp}.csv'
-
     # Get client from pool or create new one
     if connection_pool:
         sf_client = connection_pool.get_connection()
         try:
-            execute_soql_query_simple_salesforce(
-                sf_client, query, output_file, error_handler, usage_monitor
+            records = execute_soql_query_simple_salesforce(
+                sf_client, query, error_handler, usage_monitor
             )
-            return output_file
         finally:
             connection_pool.return_connection(sf_client)
     else:
@@ -233,7 +236,19 @@ def query_attachments_with_simple_salesforce(
         adapter = SFCLIAuthAdapter(org_alias)
         sf_client = adapter.get_client()
 
-        execute_soql_query_simple_salesforce(
-            sf_client, query, output_file, error_handler, usage_monitor
+        records = execute_soql_query_simple_salesforce(
+            sf_client, query, error_handler, usage_monitor
         )
-        return output_file
+
+    # Convert to AttachmentRecord instances
+    attachment_records = _records_to_attachment_records(records)
+
+    # Optionally write metadata CSV
+    if save_metadata and metadata_csv_path:
+        metadata_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        if records:
+            _write_records_to_csv(records, metadata_csv_path)
+        else:
+            _write_empty_csv(metadata_csv_path)
+
+    return attachment_records

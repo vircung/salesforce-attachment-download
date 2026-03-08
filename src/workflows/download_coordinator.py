@@ -2,28 +2,35 @@
 Download Coordinator Module
 
 Orchestrates Phase 3: File download execution.
-Manages temp directory lifecycle and executes downloads for all attachment metadata.
+Objects processed sequentially, batches within each object in parallel.
 """
 
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Tuple, Set
 from dataclasses import dataclass
 from threading import Lock
 
+from src.models import AttachmentRecord, BatchResult, ObjectQueryResult
 from src.progress.stages import DownloadStage
 from src.workflows.thread_pool import WorkflowThreadPool
+from src.workflows.common import ensure_directories
 from src.api.sf_connection import SalesforceConnectionPool
 from src.api.sf_error_handler import SalesforceErrorHandler
 from src.api.usage_monitor import SalesforceUsageMonitor
-from src.exceptions import SFAPIError
+from src.download.filename import (
+    detect_filename_collisions, build_output_filename, FilenameInfo
+)
+from src.download.scan import (
+    scan_existing_files, load_skipped_attachment_ids, write_skipped_files_report
+)
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class DownloadResult:
-    """Result of downloading attachments for a single CSV."""
+    """Result of downloading attachments for a single object."""
     csv_name: str
     downloaded_count: int
     skipped_count: int
@@ -32,149 +39,175 @@ class DownloadResult:
     total_attachments: int
 
 
+def split_batches(
+    batches: List[BatchResult],
+    filename_info_map: Dict[str, FilenameInfo],
+    existing_filenames: Set[str],
+    skipped_ids: Set[str],
+) -> Tuple[List[BatchResult], int, int]:
+    """Split batches into to_download and already_exists.
+
+    For each attachment in each batch:
+    - build output filename via build_output_filename()
+    - if filename in existing_filenames -> skip (already downloaded)
+    - if attachment.id in skipped_ids -> skip (permanently failed)
+    - otherwise -> include in to_download
+
+    Returns:
+        (to_download_batches, skipped_existing_count, skipped_permanent_count)
+
+    Preserves original batch_idx. Excludes empty batches.
+    """
+    to_download_batches = []
+    skipped_existing = 0
+    skipped_permanent = 0
+
+    for batch in batches:
+        remaining = []
+        for attachment in batch.attachments:
+            if attachment.id in skipped_ids:
+                skipped_permanent += 1
+                continue
+            output_filename = build_output_filename(attachment, filename_info_map)
+            if output_filename in existing_filenames:
+                skipped_existing += 1
+                continue
+            remaining.append(attachment)
+
+        if remaining:
+            to_download_batches.append(BatchResult(
+                batch_idx=batch.batch_idx,
+                attachments=remaining,
+            ))
+
+    return to_download_batches, skipped_existing, skipped_permanent
+
+
 def coordinate_all_downloads(
-    query_results: List[Any],  # List[QueryResult] but avoid circular import
+    object_results: List[ObjectQueryResult],
     org_alias: str,
     output_dir: Path,
     download_stage: DownloadStage,
     thread_pool: WorkflowThreadPool,
+    connection_pool: SalesforceConnectionPool,
+    error_handler: SalesforceErrorHandler,
+    usage_monitor: SalesforceUsageMonitor,
     download_enabled: bool = True,
-    connection_pool: Optional[SalesforceConnectionPool] = None,
-    error_handler: Optional[SalesforceErrorHandler] = None,
-    usage_monitor: Optional[SalesforceUsageMonitor] = None
 ) -> List[DownloadResult]:
     """
-    Coordinate download of all attachments across all CSVs.
-    
-    Uses thread pool for execution.
-    
-    Args:
-        query_results: List of query results (one per CSV)
-        org_alias: Salesforce org alias
-        output_dir: Base output directory
-        download_stage: Progress tracking stage (must be pre-initialized)
-        thread_pool: Thread pool for execution
-        download_enabled: Whether to actually download files
-    
-    Returns:
-        List of DownloadResult objects (one per CSV)
-    
-    Raises:
-        SFNetworkError: If network error occurs during download
-        SFAuthError: If authentication fails
-        SFAPIError: If API error occurs
+    Coordinate download of all attachments.
+
+    Objects processed sequentially, batches within each object in parallel.
     """
-    download_results = []
-    
-    # Calculate global total ONCE
-    total_attachments_all = sum(qr.total_attachments_found for qr in query_results)
-    
-    # Initialize progress ONCE with global total (coordinator's responsibility)
-    download_stage.start_downloads(total_attachments_all)
-    
-    # Early return: downloads disabled
     if not download_enabled:
-        logger.info("Download phase skipped (download=False)")
-        download_stage.complete("Download disabled")
-        
-        for query_result in query_results:
-            download_results.append(DownloadResult(
-                csv_name=query_result.csv_name,
-                downloaded_count=0,
-                skipped_count=query_result.total_attachments_found,
-                failed_count=0,
-                errors=[],
-                total_attachments=0
-            ))
-        return download_results
-    
-    # Early return: no attachments
-    if total_attachments_all == 0:
-        logger.info("No attachments to download")
-        download_stage.complete("No attachments found")
         return [
             DownloadResult(
-                csv_name=qr.csv_name,
-                downloaded_count=0,
-                skipped_count=0,
-                failed_count=0,
-                errors=[],
-                total_attachments=0
+                csv_name=obj.csv_name, downloaded_count=0,
+                skipped_count=0, failed_count=0, errors=[],
+                total_attachments=obj.total_attachments
             )
-            for qr in query_results
+            for obj in object_results
         ]
-    
-    # Execute downloads: always use thread pool
-    logger.info(f"Downloading {total_attachments_all} attachments with {thread_pool.config.query_workers} workers")
-    
-    # Clear any leftover results from previous phases
-    thread_pool.clear_results()
-    
-    # Create shared counter for progress tracking across all workers
-    completed_counter = {
-        'count': 0,
-        'lock': Lock()
-    }
-    
-    # Submit all CSV downloads to thread pool
-    from src.download.downloader_simple import download_attachments_simple_salesforce  # Lazy import to avoid circular dependency
-    for query_result in query_results:
-        csv_files_dir = output_dir / query_result.csv_name / 'files'
-        
-        thread_pool.submit_task(
-            task_id=f"download_{query_result.csv_name}",
-            fn=download_attachments_simple_salesforce,
-            max_retries=1,
-            args=(
-                query_result.merged_csv_path,      # metadata_csv
-                csv_files_dir,                      # output_dir
-                org_alias,                          # org_alias
-                connection_pool,                    # connection_pool
-                error_handler,                      # error_handler
-                usage_monitor,                      # usage_monitor
-                None,                               # filter_config
-                download_stage,                     # progress_stage
-                completed_counter                   # shared counter for global progress tracking
-            )
+
+    # Compute total across all objects
+    total_all = sum(obj.total_attachments for obj in object_results)
+    download_stage.start_downloads(total_all)
+
+    # One completed_counter for the entire run (cumulative, not reset per object)
+    completed_counter = {'count': 0, 'lock': Lock()}
+
+    # instance_url for skipped_files.json manual download URLs
+    instance_url = connection_pool.instance_url
+
+    all_download_results = []
+
+    # Lazy import to avoid circular dependency
+    from src.download.downloader_simple import download_batch
+
+    for obj_result in object_results:
+        output_files_dir = output_dir / obj_result.csv_name / 'files'
+        ensure_directories(output_files_dir)
+
+        # Flatten for collision detection
+        all_attachments = [a for b in obj_result.batches for a in b.attachments]
+        filename_info_map = detect_filename_collisions(all_attachments)
+
+        # Scan + split
+        existing = scan_existing_files(output_files_dir)
+        skipped_files_path = output_dir / 'skipped_files.json'
+        skipped_ids = load_skipped_attachment_ids(skipped_files_path)
+
+        to_download_batches, skipped_existing, skipped_permanent = split_batches(
+            obj_result.batches, filename_info_map, existing, skipped_ids
         )
-    
-    # Wait for all downloads to complete
-    worker_results = thread_pool.wait_for_completion(phase_name="download", timeout=None)
-    
-    # Check for failures
-    failed_tasks = [wr for wr in worker_results if not wr.success]
-    if failed_tasks:
-        error_details = [f"{wr.task_id}: {wr.error}" for wr in failed_tasks]
-        error_msg = f"Download phase failed: {len(failed_tasks)} CSV(s) failed\n" + "\n".join(error_details)
-        download_stage.fail(error_msg)
-        raise SFAPIError(error_msg)
-    
-    # Convert worker results to DownloadResult
-    for worker_result in worker_results:
-        if worker_result.result is None:
-            continue  # Skip if no result
-        stats = worker_result.result
-        csv_name = worker_result.task_id.replace("download_", "")
-        
-        download_results.append(DownloadResult(
-            csv_name=csv_name,
-            downloaded_count=stats['success'],
-            skipped_count=stats['skipped'],
-            failed_count=stats['failed'],
-            errors=stats['errors'],
-            total_attachments=stats['total']
+
+        total_skipped = skipped_existing + skipped_permanent
+        if total_skipped > 0:
+            download_stage.adjust_total(total_skipped)
+
+        # Submit per-batch workers
+        for batch in to_download_batches:
+            thread_pool.submit_task(
+                task_id=f"download_{obj_result.csv_name}_batch_{batch.batch_idx}",
+                fn=download_batch,
+                max_retries=1,
+                args=(
+                    batch.attachments, output_files_dir, filename_info_map,
+                    connection_pool, error_handler, usage_monitor,
+                    download_stage, completed_counter
+                )
+            )
+
+        # Wait for this object's batches (no timeout for downloads)
+        worker_results = thread_pool.wait_for_completion(
+            phase_name=f"download_{obj_result.csv_name}",
+            timeout=None
+        )
+        thread_pool.clear_results()
+
+        # Aggregate batch results into DownloadResult
+        total_downloaded = 0
+        total_failed = 0
+        all_errors: List[Dict[str, Any]] = []
+
+        # Exact-match lookup: task_id -> batch
+        batch_by_task = {
+            f"download_{obj_result.csv_name}_batch_{b.batch_idx}": b
+            for b in to_download_batches
+        }
+
+        for wr in worker_results:
+            if wr.success and wr.result:
+                total_downloaded += wr.result['success']
+                total_failed += wr.result['failed']
+                all_errors.extend(wr.result.get('errors', []))
+            elif not wr.success:
+                # Failed worker (e.g. SFNetworkError/SFAuthError)
+                batch = batch_by_task.get(wr.task_id)
+                batch_size = len(batch.attachments) if batch else 0
+                total_failed += batch_size
+                logger.error(f"Batch worker {wr.task_id} failed: {wr.error}")
+
+        # Write skipped_files.json for OS errors
+        os_errors = [e for e in all_errors if e.get('error_type') == 'OSError']
+        if os_errors:
+            write_skipped_files_report(os_errors, skipped_files_path, instance_url)
+
+        all_download_results.append(DownloadResult(
+            csv_name=obj_result.csv_name,
+            downloaded_count=total_downloaded,
+            skipped_count=total_skipped,
+            failed_count=total_failed,
+            errors=all_errors,
+            total_attachments=obj_result.total_attachments,
         ))
-    
-    # Aggregate final stats
-    total_downloaded = sum(dr.downloaded_count for dr in download_results)
-    total_failed = sum(dr.failed_count for dr in download_results)
-    total_skipped = sum(dr.skipped_count for dr in download_results)
-    
-    # Complete progress with summary
+
+    # Mark download phase complete
+    total_dl = sum(dr.downloaded_count for dr in all_download_results)
+    total_fail = sum(dr.failed_count for dr in all_download_results)
+    total_skip = sum(dr.skipped_count for dr in all_download_results)
     download_stage.complete(
-        f"Downloaded {total_downloaded} files, failed {total_failed}, skipped {total_skipped}"
+        f"Downloaded {total_dl} files, failed {total_fail}, skipped {total_skip}"
     )
-    
-    logger.info(f"Download phase complete: {total_downloaded} downloaded, {total_failed} failed, {total_skipped} skipped")
-    
-    return download_results
+
+    return all_download_results

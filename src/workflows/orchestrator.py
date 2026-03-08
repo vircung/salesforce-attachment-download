@@ -45,7 +45,8 @@ def process(
     batch_size: int = 100,
     download: bool = True,
     progress_tracker: Optional[ProgressTracker] = None,
-    workers: int = 2
+    workers: int = 2,
+    save_metadata: bool = False,
 ) -> Dict[str, Any]:
     """
     Main entry point: orchestrate three-phase workflow.
@@ -171,31 +172,26 @@ def process(
                     thread_pool=thread_pool,
                     connection_pool=connection_pool,
                     error_handler=error_handler,
-                    usage_monitor=usage_monitor
+                    usage_monitor=usage_monitor,
+                    save_metadata=save_metadata,
                 )
-                
-                # Pre-populate Download stage total for Phase 3
-                total_attachments = sum(qr.total_attachments_found for qr in query_results)
-                if total_attachments > 0 and download_stage:
-                    download_stage.set_total(total_attachments)
-                    logger.debug(f"Pre-populated Download stage total: {total_attachments} attachments")
-                    
+
                 # ============================================================
                 # PHASE 3: DOWNLOADS (ALL CSVs)
                 # ============================================================
                 log_section_header(WorkflowPhase.DOWNLOADS)
                 download_results = []
-                from src.workflows.download_coordinator import coordinate_all_downloads  # Lazy import to avoid circular dependency
+                from src.workflows.download_coordinator import coordinate_all_downloads
                 download_results = coordinate_all_downloads(
-                    query_results=query_results,
+                    object_results=query_results,
                     org_alias=org_alias,
                     output_dir=output_dir,
                     download_stage=download_stage,
                     thread_pool=thread_pool,
-                    download_enabled=download,
                     connection_pool=connection_pool,
                     error_handler=error_handler,
-                    usage_monitor=usage_monitor
+                    usage_monitor=usage_monitor,
+                    download_enabled=download,
                 )
         except Exception as e:
             workflow_error_handler.handle_query_error("all_queries", e)
@@ -216,13 +212,13 @@ def process(
             'total_csv_files': len(csv_records),
             'total_records': sum(csv_info.total_records for csv_info in csv_records),
             'total_batches': sum(csv_info.total_batches for csv_info in csv_records),
-            'total_attachments': sum(qr.total_attachments_found for qr in query_results),
+            'total_attachments': sum(qr.total_attachments for qr in query_results),
             'per_csv': [
                 {
                     'csv_name': csv_info.csv_name,
                     'records': csv_info.total_records,
                     'batches': csv_info.total_batches,
-                    'attachments': qr.total_attachments_found,
+                    'attachments': qr.total_attachments,
                     'downloaded': dr.downloaded_count,
                     'output_dir': str(csv_dir)
                 }
@@ -230,10 +226,9 @@ def process(
             ]
         }
         
-        # Mark stages as complete
+        # Mark stages as complete (download_stage already completed by coordinator)
         csv_stage.complete(f"Processed {len(csv_records)} CSV files")
         soql_stage.complete(f"Completed {stats['total_batches']} batches")
-        download_stage.complete(f"Downloaded {stats['total_attachments']} attachments")
         
         # Log final summary
         logger.info(f"Total CSV files: {stats['total_csv_files']}")

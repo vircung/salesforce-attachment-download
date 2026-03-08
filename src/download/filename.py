@@ -11,7 +11,9 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union
+
+from src.models import AttachmentRecord
 
 logger = logging.getLogger(__name__)
 
@@ -58,26 +60,26 @@ def sanitize_filename(filename: str) -> str:
 
 
 def detect_filename_collisions(
-    attachments: List[Dict[str, str]]
+    attachments: List[AttachmentRecord]
 ) -> Dict[str, FilenameInfo]:
     """
     Detect filename collisions and pre-compute sanitized filenames.
     Uses lowercase comparison for collision detection to be filesystem-agnostic.
 
     Args:
-        attachments: List of attachment dictionaries with Id, ParentId, Name
+        attachments: List of AttachmentRecord instances
 
     Returns:
-        Dict mapping attachment Id to FilenameInfo with safe_name and collision flag
+        Dict mapping attachment id to FilenameInfo with safe_name and collision flag
     """
     # First pass: count occurrences per (parent_id, safe_name_lowercase)
     occurrence_count: Dict[Tuple[str, str], int] = defaultdict(int)
     attachment_info: Dict[str, Tuple[str, str, Tuple[str, str]]] = {}
 
     for attachment in attachments:
-        attachment_id = attachment['Id']
-        parent_id = attachment.get('ParentId', DEFAULT_PARENT_ID)
-        original_name = attachment.get('Name', 'unnamed')
+        attachment_id = attachment.id
+        parent_id = attachment.parent_id or DEFAULT_PARENT_ID
+        original_name = attachment.name or 'unnamed'
         safe_name = sanitize_filename(original_name)
 
         # Use lowercase for collision detection (filesystem-agnostic)
@@ -161,7 +163,7 @@ def check_filename_length(filepath: Path, attachment_id: str = '') -> bool:
 
 
 def build_output_filename(
-    attachment: Dict[str, str],
+    attachment: AttachmentRecord,
     filename_info_map: Dict[str, 'FilenameInfo']
 ) -> str:
     """Build the output filename for an attachment.
@@ -169,15 +171,15 @@ def build_output_filename(
     Uses {parent_id}_{safe_name} normally,
     or {parent_id}_{attachment_id}_{safe_name} when a collision is detected.
     """
-    attachment_id = attachment['Id']
-    parent_id = attachment.get('ParentId', DEFAULT_PARENT_ID)
+    attachment_id = attachment.id
+    parent_id = attachment.parent_id or DEFAULT_PARENT_ID
 
     filename_info = filename_info_map.get(attachment_id)
     if filename_info:
         safe_name = filename_info.safe_name
         has_collision = filename_info.has_collision
     else:
-        safe_name = sanitize_filename(attachment.get('Name', 'unnamed'))
+        safe_name = sanitize_filename(attachment.name or 'unnamed')
         has_collision = False
 
     if has_collision:

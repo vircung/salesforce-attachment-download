@@ -52,6 +52,7 @@ class SalesforceConnectionPool:
         self.pool_size = calculate_pool_size(workers)
         self._pool: Queue[Salesforce] = Queue(maxsize=self.pool_size)
         self._lock = Lock()
+        self._instance_url: str = ''
         self._initialize_pool()
 
     def _initialize_pool(self) -> None:
@@ -59,12 +60,22 @@ class SalesforceConnectionPool:
         Initialize the pool with authenticated client instances.
 
         Creates the specified number of simple-salesforce clients
-        using the authentication adapter.
+        using the authentication adapter. Captures instance_url from
+        the auth adapter for use in download URLs.
         """
+        from src.api.sf_auth import get_sf_auth_info
+        auth_info = get_sf_auth_info(self.org_alias)
+        self._instance_url = auth_info.get('instance_url', '')
+
         adapter = SFCLIAuthAdapter(self.org_alias)
         for _ in range(self.pool_size):
             client = adapter.get_client()
             self._pool.put(client)
+
+    @property
+    def instance_url(self) -> str:
+        """Salesforce instance URL (e.g. https://myorg.my.salesforce.com)."""
+        return self._instance_url
 
     def get_connection(self) -> Salesforce:
         """

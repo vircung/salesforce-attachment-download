@@ -127,6 +127,12 @@ def parse_arguments():
         default=env_progress,
         help=f'Progress display mode: auto (detect best), on (force display), off (disable), tqdm (force tqdm). (default: {env_progress})'
     )
+    parser.add_argument(
+        '--save-metadata',
+        action='store_true',
+        default=False,
+        help='Write SOQL result batch CSVs to disk for audit/debug (default: False)'
+    )
 
     args = parser.parse_args()
 
