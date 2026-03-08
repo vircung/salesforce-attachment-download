@@ -128,7 +128,8 @@ def process(
         logger.debug(f"Initialized Salesforce components: pool_size={connection_pool.pool_size}")
         
         # Create thread pool configuration and context manager
-        thread_pool_config = ThreadPoolConfig(query_workers=workers)
+        thread_pool_config = ThreadPoolConfig.from_env()
+        thread_pool_config.query_workers = workers
         thread_pool = WorkflowThreadPool(thread_pool_config)
         logger.debug(f"Created thread pool: workers={workers}")
         
