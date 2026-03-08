@@ -109,6 +109,9 @@ def coordinate_all_downloads(
             for obj in object_results
         ]
 
+    # Clear stale results from query phase
+    thread_pool.clear_results()
+
     # Compute total across all objects
     total_all = sum(obj.total_attachments for obj in object_results)
     download_stage.start_downloads(total_all)
