@@ -193,7 +193,7 @@ def execute_all_batches_threaded(
         cumulative_batch_num += csv_info.total_batches
     
     # Wait for all tasks to complete
-    worker_results = thread_pool.wait_for_completion("SOQL Query Phase")
+    worker_results = thread_pool.wait_for_completion("SOQL Query Phase", timeout=thread_pool.config.query_timeout)
     
     # Check for failures
     failed_tasks = [wr for wr in worker_results if not wr.success]

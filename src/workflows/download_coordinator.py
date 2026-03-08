@@ -124,6 +124,7 @@ def coordinate_all_downloads(
         thread_pool.submit_task(
             task_id=f"download_{query_result.csv_name}",
             fn=download_attachments_simple_salesforce,
+            max_retries=1,
             args=(
                 query_result.merged_csv_path,      # metadata_csv
                 csv_files_dir,                      # output_dir
@@ -138,7 +139,7 @@ def coordinate_all_downloads(
         )
     
     # Wait for all downloads to complete
-    worker_results = thread_pool.wait_for_completion(phase_name="download")
+    worker_results = thread_pool.wait_for_completion(phase_name="download", timeout=None)
     
     # Check for failures
     failed_tasks = [wr for wr in worker_results if not wr.success]

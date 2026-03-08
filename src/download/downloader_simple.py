@@ -171,6 +171,11 @@ def _download_attachment_internal(
     """
     logger.debug(f"Downloading attachment: {attachment_id}")
 
+    # Never overwrite an existing file
+    if output_path.exists():
+        logger.debug(f"File already exists, skipping: {output_path.name}")
+        return 0
+
     # Create parent directory if needed
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

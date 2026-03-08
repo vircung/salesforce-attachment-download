@@ -127,6 +127,7 @@ class WorkflowThreadPool:
         task_id: str,
         fn: Callable[..., Any],
         args: tuple,
+        max_retries: int = 3,
     ) -> None:
         """Submit a task for execution.
 
@@ -134,9 +135,10 @@ class WorkflowThreadPool:
             task_id: Unique task identifier
             fn: Callable to execute
             args: Arguments to pass to the callable
+            max_retries: Max retry attempts (1 = no retries)
         """
         future = self.executor.submit(
-            self._execute_with_retries, task_id, fn, args, 3
+            self._execute_with_retries, task_id, fn, args, max_retries
         )
         self.pending_futures[task_id] = future
         logger.debug(f"Submitted task {task_id}")
@@ -192,28 +194,30 @@ class WorkflowThreadPool:
             duration_ms=duration,
         )
 
-    def wait_for_completion(self, phase_name: str) -> List[WorkerResult]:
+    def wait_for_completion(self, phase_name: str, timeout: Optional[int] = None) -> List[WorkerResult]:
         """Wait for all pending tasks to complete.
 
         Args:
             phase_name: Name of the workflow phase for logging
+            timeout: Per-task timeout in seconds. None = wait indefinitely.
+                     Use None for long-running tasks like downloads.
+                     Use config.query_timeout for short tasks like SOQL queries.
 
         Returns:
             List of WorkerResult objects for all tasks
         """
-        # Wait for all futures with timeout
         for task_id, future in list(self.pending_futures.items()):
             try:
-                worker_result = future.result(timeout=self.config.query_timeout)
+                worker_result = future.result(timeout=timeout)
                 self.results[task_id] = worker_result
             except concurrent.futures.TimeoutError:
-                logger.warning(f"Task {task_id} timed out after {self.config.query_timeout}s")
+                logger.warning(f"Task {task_id} timed out after {timeout}s")
                 self.results[task_id] = WorkerResult(
                     task_id=task_id,
                     success=False,
-                    error=TimeoutError(f"Task timed out after {self.config.query_timeout}s"),
+                    error=TimeoutError(f"Task timed out after {timeout}s"),
                     attempts=1,
-                    duration_ms=self.config.query_timeout * 1000,
+                    duration_ms=(timeout or 0) * 1000,
                 )
             except Exception as e:
                 logger.warning(f"Task {task_id} failed: {e}")
