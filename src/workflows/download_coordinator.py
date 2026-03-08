@@ -8,6 +8,7 @@ Two-pass architecture:
 """
 
 import logging
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Set, Optional
 from dataclasses import dataclass
@@ -48,7 +49,7 @@ class ObjectPrepResult:
     obj_result: ObjectQueryResult
     to_download_batches: List[BatchResult]
     filename_info_map: Dict[str, FilenameInfo]
-    output_files_dir: Path
+    output_obj_dir: Path
     skipped_existing: int
     skipped_permanent: int
 
@@ -89,6 +90,47 @@ def split_batches(
             ))
 
     return to_download_batches, skipped_existing, skipped_permanent
+
+
+def _cleanup_obj_dir(output_obj_dir: Path) -> None:
+    """Remove temp dirs and empty object directories after download."""
+    try:
+        if not output_obj_dir.exists():
+            return
+
+        # Always clean .tmp_downloads
+        tmp_dir = output_obj_dir / '.tmp_downloads'
+        if tmp_dir.exists():
+            try:
+                shutil.rmtree(tmp_dir)
+            except OSError as e:
+                logger.warning("Could not remove %s: %s", tmp_dir, e)
+
+        # Check if dir has any real files (not just subdirs)
+        has_flat_files = any(e.is_file() for e in output_obj_dir.iterdir())
+        legacy_dir = output_obj_dir / 'files'
+        has_legacy_files = (
+            legacy_dir.is_dir()
+            and any(e.is_file() for e in legacy_dir.iterdir())
+        )
+        has_files = has_flat_files or has_legacy_files
+
+        if not has_files:
+            # No downloaded files anywhere — clean up empty subdirs
+            for subdir_name in ('metadata', 'files'):
+                subdir = output_obj_dir / subdir_name
+                if subdir.exists() and not any(subdir.iterdir()):
+                    try:
+                        subdir.rmdir()
+                    except OSError as e:
+                        logger.warning("Could not remove %s: %s", subdir, e)
+
+        # Remove object dir if now empty
+        if not any(output_obj_dir.iterdir()):
+            output_obj_dir.rmdir()
+
+    except OSError as e:
+        logger.debug("Cleanup failed for %s: %s", output_obj_dir, e)
 
 
 def coordinate_all_downloads(
@@ -139,15 +181,14 @@ def coordinate_all_downloads(
 
     try:
         for i, obj_result in enumerate(object_results):
-            output_files_dir = output_dir / obj_result.csv_name / 'files'
-            ensure_directories(output_files_dir)
+            output_obj_dir = output_dir / obj_result.csv_name
 
             # Flatten for collision detection
             all_attachments = [a for b in obj_result.batches for a in b.attachments]
             filename_info_map = detect_filename_collisions(all_attachments)
 
             # Scan existing + load skipped IDs (per-object read)
-            existing = scan_existing_files(output_files_dir)
+            existing = scan_existing_files(output_obj_dir)
             skipped_ids = load_skipped_attachment_ids(skipped_files_path)
 
             to_download_batches, skipped_existing, skipped_permanent = split_batches(
@@ -159,11 +200,15 @@ def coordinate_all_downloads(
             total_to_download += obj_to_download
             total_skipped += obj_skipped
 
+            # Only create directory when there are files to download
+            if obj_to_download > 0:
+                ensure_directories(output_obj_dir)
+
             prep_results.append(ObjectPrepResult(
                 obj_result=obj_result,
                 to_download_batches=to_download_batches,
                 filename_info_map=filename_info_map,
-                output_files_dir=output_files_dir,
+                output_obj_dir=output_obj_dir,
                 skipped_existing=skipped_existing,
                 skipped_permanent=skipped_permanent,
             ))
@@ -210,7 +255,7 @@ def coordinate_all_downloads(
                 fn=download_batch,
                 max_retries=1,
                 args=(
-                    batch.attachments, prep.output_files_dir, prep.filename_info_map,
+                    batch.attachments, prep.output_obj_dir, prep.filename_info_map,
                     connection_pool, error_handler, usage_monitor,
                     download_stage, completed_counter
                 )
@@ -260,6 +305,9 @@ def coordinate_all_downloads(
             errors=all_errors,
             total_attachments=obj_result.total_attachments,
         ))
+
+        # Cleanup after everything is done for this object
+        _cleanup_obj_dir(prep.output_obj_dir)
 
     # Mark download phase complete
     total_dl = sum(dr.downloaded_count for dr in all_download_results)

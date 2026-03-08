@@ -17,12 +17,6 @@ class WorkflowPhase:
     SUMMARY = "WORKFLOW SUMMARY"
 
 
-class Directories:
-    """Standard directory names."""
-    METADATA = 'metadata'
-    FILES = 'files'
-
-
 class Columns:
     """CSV column names."""
     ID = 'Id'

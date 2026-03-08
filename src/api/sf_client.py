@@ -115,7 +115,7 @@ class SalesforceClient:
             # Create parent directory if needed
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            temp_dir_path = output_path.parent.parent / DEFAULT_TMP_DIR_NAME
+            temp_dir_path = output_path.parent / DEFAULT_TMP_DIR_NAME
             temp_dir_path.mkdir(parents=True, exist_ok=True)
 
             # Download to temporary file first, then atomically replace.

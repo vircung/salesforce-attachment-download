@@ -237,15 +237,17 @@ output/
     ├── metadata/                   # (only with --save-metadata)
     │   ├── batch_0_20260114_120000.csv
     │   └── batch_1_20260114_120001.csv
-    └── files/
-        ├── a3xAAA111_invoice.pdf
-        ├── a3xAAA111_receipt.pdf
-        └── a3xAAA222_contract.pdf
+    ├── a3xAAA111_invoice.pdf
+    ├── a3xAAA111_receipt.pdf
+    └── a3xAAA222_contract.pdf
 ```
 
 Each CSV file gets its own subfolder containing:
-- `files/` with downloaded attachment binaries
+- Downloaded attachment binaries (directly in the object directory)
 - `metadata/` with per-batch SOQL result CSVs (only when `--save-metadata` is used)
+
+Object directories are only created when there are files to download.
+Empty directories are cleaned up automatically after processing.
 
 **Filename Convention:**
 - Default format: `{ParentId}_{original_filename}`

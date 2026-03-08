@@ -30,7 +30,7 @@ from src.api.usage_monitor import SalesforceUsageMonitor
 from src.workflows.error_handler import WorkflowErrorHandler
 
 # Directory management
-from src.workflows.directory_manager import create_csv_directories
+
 
 # Thread pool support
 from src.workflows.thread_pool import ThreadPoolConfig, WorkflowThreadPool
@@ -206,10 +206,7 @@ def process(
         log_section_header(WorkflowPhase.SUMMARY)
         
         # Build statistics inline
-        csv_dirs = []
-        for csv_info in csv_records:
-            dirs = create_csv_directories(output_dir, csv_info.csv_name)
-            csv_dirs.append(dirs.csv_output_dir)
+        csv_dirs = [output_dir / csv_info.csv_name for csv_info in csv_records]
         
         stats = {
             'total_csv_files': len(csv_records),

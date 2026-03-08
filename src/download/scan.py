@@ -31,6 +31,21 @@ def scan_existing_files(output_dir: Path) -> Set[str]:
         existing.add(entry.name)
 
     logger.info("Scan: found %d existing files in %s", len(existing), output_dir)
+
+    # Backward compat: also scan files/ subdir from old layout
+    files_subdir = output_dir / 'files'
+    if files_subdir.is_dir():
+        logger.info("Scan: found legacy files/ subdir in %s", output_dir)
+        pre_legacy_count = len(existing)
+        for entry in files_subdir.iterdir():
+            if entry.is_dir() or entry.name.endswith('.part'):
+                continue
+            existing.add(entry.name)
+        legacy_count = len(existing) - pre_legacy_count
+        if legacy_count > 0:
+            logger.info("Scan: %d additional files from legacy files/ subdir",
+                         legacy_count)
+
     return existing
 
 

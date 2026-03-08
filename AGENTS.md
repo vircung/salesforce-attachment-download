@@ -27,7 +27,7 @@ src/
     orchestrator.py        # Three-phase workflow orchestration
     csv_coordinator.py     # Phase 1: CSV discovery
     query_coordinator.py   # Phase 2: SOQL querying (in-memory results)
-    download_coordinator.py # Phase 3: Per-batch parallel downloads
+    download_coordinator.py # Phase 3: Per-batch parallel downloads + cleanup
     thread_pool.py         # Thread pool with retry logic
     common.py              # ensure_directories()
   csv/                     # CSV processing
