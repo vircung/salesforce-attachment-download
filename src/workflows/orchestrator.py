@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 
 from src.utils import log_section_header
 from src.progress.core import ProgressTracker
-from src.progress.stages import CsvProcessingStage, SoqlQueryStage, DownloadStage
+from src.progress.stages import CsvProcessingStage, SoqlQueryStage, DownloadPrepStage, DownloadStage
 from src.exceptions import SFAuthError, SFQueryError, SFAPIError
 from src.workflows.exception_handler import WorkflowExceptionHandler
 from src.constants import WorkflowPhase
@@ -106,12 +106,14 @@ def process(
         # Initialize progress stages
         csv_stage = CsvProcessingStage()
         soql_stage = SoqlQueryStage()
+        download_prep_stage = DownloadPrepStage()
         download_stage = DownloadStage()
         
         # Add to tracker if provided
         if progress_tracker:
             progress_tracker.add_stage(csv_stage)
             progress_tracker.add_stage(soql_stage)
+            progress_tracker.add_stage(download_prep_stage)
             progress_tracker.add_stage(download_stage)
         
         # Initialize error handlers
@@ -192,6 +194,7 @@ def process(
                     error_handler=error_handler,
                     usage_monitor=usage_monitor,
                     download_enabled=download,
+                    download_prep_stage=download_prep_stage,
                 )
         except Exception as e:
             workflow_error_handler.handle_query_error("all_queries", e)

@@ -2,17 +2,20 @@
 Download Coordinator Module
 
 Orchestrates Phase 3: File download execution.
-Objects processed sequentially, batches within each object in parallel.
+Two-pass architecture:
+  Pass 1 (prep): scan, collision detection, split for all objects
+  Pass 2 (download): submit batch workers per object, wait per object
 """
 
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Set
+from typing import List, Dict, Any, Tuple, Set, Optional
 from dataclasses import dataclass
 from threading import Lock
 
 from src.models import AttachmentRecord, BatchResult, ObjectQueryResult
 from src.progress.stages import DownloadStage
+from src.progress.stages.download_prep_stage import DownloadPrepStage
 from src.workflows.thread_pool import WorkflowThreadPool
 from src.workflows.common import ensure_directories
 from src.api.sf_connection import SalesforceConnectionPool
@@ -39,6 +42,17 @@ class DownloadResult:
     total_attachments: int
 
 
+@dataclass
+class ObjectPrepResult:
+    """Intermediate structure carrying prep results between Pass 1 and Pass 2."""
+    obj_result: ObjectQueryResult
+    to_download_batches: List[BatchResult]
+    filename_info_map: Dict[str, FilenameInfo]
+    output_files_dir: Path
+    skipped_existing: int
+    skipped_permanent: int
+
+
 def split_batches(
     batches: List[BatchResult],
     filename_info_map: Dict[str, FilenameInfo],
@@ -46,12 +60,6 @@ def split_batches(
     skipped_ids: Set[str],
 ) -> Tuple[List[BatchResult], int, int]:
     """Split batches into to_download and already_exists.
-
-    For each attachment in each batch:
-    - build output filename via build_output_filename()
-    - if filename in existing_filenames -> skip (already downloaded)
-    - if attachment.id in skipped_ids -> skip (permanently failed)
-    - otherwise -> include in to_download
 
     Returns:
         (to_download_batches, skipped_existing_count, skipped_permanent_count)
@@ -93,11 +101,15 @@ def coordinate_all_downloads(
     error_handler: SalesforceErrorHandler,
     usage_monitor: SalesforceUsageMonitor,
     download_enabled: bool = True,
+    *,
+    download_prep_stage: Optional[DownloadPrepStage] = None,
 ) -> List[DownloadResult]:
     """
     Coordinate download of all attachments.
 
-    Objects processed sequentially, batches within each object in parallel.
+    Two-pass architecture:
+      Pass 1: scan + collision detection + split for all objects
+      Pass 2: submit batch workers per object, wait per object
     """
     if not download_enabled:
         return [
@@ -112,50 +124,93 @@ def coordinate_all_downloads(
     # Clear stale results from query phase
     thread_pool.clear_results()
 
-    # Compute total across all objects
-    total_all = sum(obj.total_attachments for obj in object_results)
-    download_stage.start_downloads(total_all)
+    # Hoist shared state
+    skipped_files_path = output_dir / 'skipped_files.json'
 
-    # One completed_counter for the entire run (cumulative, not reset per object)
+    # ================================================================
+    # PASS 1: PREP — scan, collision detection, split for all objects
+    # ================================================================
+    total_to_download = 0
+    total_skipped = 0
+    prep_results: List[ObjectPrepResult] = []
+
+    if download_prep_stage:
+        download_prep_stage.start_prep(len(object_results))
+
+    try:
+        for i, obj_result in enumerate(object_results):
+            output_files_dir = output_dir / obj_result.csv_name / 'files'
+            ensure_directories(output_files_dir)
+
+            # Flatten for collision detection
+            all_attachments = [a for b in obj_result.batches for a in b.attachments]
+            filename_info_map = detect_filename_collisions(all_attachments)
+
+            # Scan existing + load skipped IDs (per-object read)
+            existing = scan_existing_files(output_files_dir)
+            skipped_ids = load_skipped_attachment_ids(skipped_files_path)
+
+            to_download_batches, skipped_existing, skipped_permanent = split_batches(
+                obj_result.batches, filename_info_map, existing, skipped_ids
+            )
+
+            obj_to_download = sum(len(b.attachments) for b in to_download_batches)
+            obj_skipped = skipped_existing + skipped_permanent
+            total_to_download += obj_to_download
+            total_skipped += obj_skipped
+
+            prep_results.append(ObjectPrepResult(
+                obj_result=obj_result,
+                to_download_batches=to_download_batches,
+                filename_info_map=filename_info_map,
+                output_files_dir=output_files_dir,
+                skipped_existing=skipped_existing,
+                skipped_permanent=skipped_permanent,
+            ))
+
+            if download_prep_stage:
+                download_prep_stage.update_object(
+                    object_idx=i + 1,
+                    object_name=obj_result.csv_name,
+                    to_download=obj_to_download,
+                    skipped=obj_skipped,
+                )
+
+        if download_prep_stage:
+            download_prep_stage.complete_prep(total_to_download, total_skipped)
+
+    except Exception:
+        if download_prep_stage:
+            download_prep_stage.fail("Download preparation failed")
+        raise
+
+    # ================================================================
+    # BETWEEN PASSES: start download stage with exact total
+    # ================================================================
+    download_stage.start_downloads(total_to_download)
+
+    # ================================================================
+    # PASS 2: DOWNLOAD — submit batch workers per object, wait per object
+    # ================================================================
     completed_counter = {'count': 0, 'lock': Lock()}
-
-    # instance_url for skipped_files.json manual download URLs
     instance_url = connection_pool.instance_url
+
+    # Lazy import inside function to avoid circular dependency
+    from src.download.downloader_simple import download_batch
 
     all_download_results = []
 
-    # Lazy import to avoid circular dependency
-    from src.download.downloader_simple import download_batch
-
-    for obj_result in object_results:
-        output_files_dir = output_dir / obj_result.csv_name / 'files'
-        ensure_directories(output_files_dir)
-
-        # Flatten for collision detection
-        all_attachments = [a for b in obj_result.batches for a in b.attachments]
-        filename_info_map = detect_filename_collisions(all_attachments)
-
-        # Scan + split
-        existing = scan_existing_files(output_files_dir)
-        skipped_files_path = output_dir / 'skipped_files.json'
-        skipped_ids = load_skipped_attachment_ids(skipped_files_path)
-
-        to_download_batches, skipped_existing, skipped_permanent = split_batches(
-            obj_result.batches, filename_info_map, existing, skipped_ids
-        )
-
-        total_skipped = skipped_existing + skipped_permanent
-        if total_skipped > 0:
-            download_stage.adjust_total(total_skipped)
+    for prep in prep_results:
+        obj_result = prep.obj_result
 
         # Submit per-batch workers
-        for batch in to_download_batches:
+        for batch in prep.to_download_batches:
             thread_pool.submit_task(
                 task_id=f"download_{obj_result.csv_name}_batch_{batch.batch_idx}",
                 fn=download_batch,
                 max_retries=1,
                 args=(
-                    batch.attachments, output_files_dir, filename_info_map,
+                    batch.attachments, prep.output_files_dir, prep.filename_info_map,
                     connection_pool, error_handler, usage_monitor,
                     download_stage, completed_counter
                 )
@@ -176,7 +231,7 @@ def coordinate_all_downloads(
         # Exact-match lookup: task_id -> batch
         batch_by_task = {
             f"download_{obj_result.csv_name}_batch_{b.batch_idx}": b
-            for b in to_download_batches
+            for b in prep.to_download_batches
         }
 
         for wr in worker_results:
@@ -196,10 +251,11 @@ def coordinate_all_downloads(
         if os_errors:
             write_skipped_files_report(os_errors, skipped_files_path, instance_url)
 
+        obj_skipped = prep.skipped_existing + prep.skipped_permanent
         all_download_results.append(DownloadResult(
             csv_name=obj_result.csv_name,
             downloaded_count=total_downloaded,
-            skipped_count=total_skipped,
+            skipped_count=obj_skipped,
             failed_count=total_failed,
             errors=all_errors,
             total_attachments=obj_result.total_attachments,

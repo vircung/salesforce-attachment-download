@@ -88,7 +88,7 @@ class RichProgressRenderer(ProgressRenderer):
         - soql_query
         - file_downloads
         """
-        stage_names = ["csv_processing", "soql_query", "file_downloads"]
+        stage_names = ["csv_processing", "soql_query", "download_prep", "file_downloads"]
         
         for stage_name in stage_names:
             if stage_name not in self._stage_data:
