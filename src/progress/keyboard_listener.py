@@ -19,7 +19,6 @@ _original_termios = None
 
 try:
     import termios
-    import tty
     _TERMIOS_AVAILABLE = True
 except ImportError:
     _TERMIOS_AVAILABLE = False
@@ -102,12 +101,23 @@ class KeyboardListener:
         logger.debug("Keyboard listener stopped")
 
     def _listen_loop(self) -> None:
-        """Read single keypresses in cbreak mode."""
+        """Read single keypresses with minimal terminal changes.
+
+        Instead of tty.setcbreak() which can disable output processing
+        and corrupt Rich Live display, we only disable ICANON and ECHO
+        on the input side, preserving all output flags.
+        """
         try:
-            tty.setcbreak(sys.stdin.fileno())
+            fd = sys.stdin.fileno()
+            attrs = termios.tcgetattr(fd)
+            # Only modify local flags: disable ICANON (line buffering) and ECHO
+            attrs[3] = attrs[3] & ~(termios.ICANON | termios.ECHO)
+            # Set VMIN=1, VTIME=0 for blocking single-char reads
+            attrs[6][termios.VMIN] = 1
+            attrs[6][termios.VTIME] = 0
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+
             while not self._stop_event.is_set():
-                # Use select-style timeout to check stop_event periodically
-                # stdin.read(1) blocks, so we check isatty and use a short approach
                 try:
                     ch = sys.stdin.read(1)
                     if ch == 'w':
