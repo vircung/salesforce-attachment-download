@@ -14,7 +14,8 @@ A Python CLI tool for downloading Salesforce Attachment records and files using 
 - Resume support — skip already-downloaded files on restart
 - Atomic file writes (`.part` temp files + `os.replace()`) — no corrupted downloads
 - Graceful handling of OS errors (e.g. filenames exceeding filesystem limits)
-- `skipped_files.json` report with manual download URLs for permanently failed files
+- Execution reports (`report_downloaded.json`, `report_missing.json`) with download URLs
+- `mise run verify` to check downloaded files exist on disk
 - Reuse sf CLI authentication (no separate OAuth setup required)
 - Rich progress display with auto-detected renderer (Rich or tqdm)
 - Advanced error handling with exponential backoff and connection pooling
@@ -232,7 +233,8 @@ python main.py --org your-org --records-dir ./records
 
 ```
 output/
-├── skipped_files.json              # (if any OS errors occurred)
+├── report_downloaded.json          # Execution report: successfully downloaded files
+├── report_missing.json             # Execution report: failed/missing files
 └── csv_name_1/
     ├── metadata/                   # (only with --save-metadata)
     │   ├── batch_0_20260114_120000.csv
@@ -247,6 +249,25 @@ Each CSV file gets its own subfolder containing:
 - `metadata/` with per-batch SOQL result CSVs (only when `--save-metadata` is used)
 
 Object directories are only created when there are files to download.
+
+### Execution Reports
+
+After each run, two JSON reports are written to `output/`:
+
+- **`report_downloaded.json`** — all successfully downloaded files with attachment_id, parent_id, filename, download URL, and file size
+- **`report_missing.json`** — all files that failed to download with error details
+
+On resume runs, reports are merged: new downloads are added, previously failed files that succeeded are moved from missing to downloaded.
+
+### Verify Task
+
+Check that all downloaded files still exist on disk:
+
+```bash
+mise run verify
+```
+
+This is useful when the output directory is synced to Google Drive or another service that may silently remove unsupported file types. Missing files are moved from `report_downloaded.json` to `report_missing.json` with `error_type: "VerifyMissing"`.
 Empty directories are cleaned up automatically after processing.
 
 **Filename Convention:**
@@ -477,7 +498,7 @@ The tool gracefully handles errors and provides clear error messages:
 
 SOQL query tasks use automatic retry logic (up to 3 attempts per batch). Download tasks use a single attempt (`max_retries=1`) with no timeout — failed downloads are counted and reported, and will be retried on the next run via resume.
 
-Per-file OS errors (e.g. filename too long) are caught, logged, and recorded in `skipped_files.json` with manual download URLs. Fatal authentication or network errors are re-raised and stop the workflow.
+Per-file OS errors (e.g. filename too long) are caught, logged, and recorded in `report_missing.json` with download URLs. Fatal authentication or network errors are re-raised and stop the workflow.
 
 ### Partial Downloads
 

@@ -14,3 +14,7 @@ run = "python main.py"
 [tasks.run-debug]
 description = "Uruchomienie z debug output"
 run = "python main.py --debug"
+
+[tasks.verify]
+description = "Verify downloaded files against execution report"
+run = "python verify_report.py"

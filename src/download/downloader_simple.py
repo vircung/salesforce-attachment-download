@@ -164,6 +164,8 @@ def download_batch(
     task_id: str = "",
     object_name: str = "",
     batch_idx: int = 0,
+    report_entries: Optional[dict] = None,
+    instance_url: str = "",
 ) -> Dict[str, Any]:
     """Download a batch of attachments from in-memory data.
 
@@ -173,8 +175,13 @@ def download_batch(
     Fatal errors (SFNetworkError, SFAuthError) are re-raised.
     OSError per file is caught and recorded.
 
+    Args:
+        report_entries: Shared mutable container {'entries': [], 'lock': Lock()}
+            for preserving report data across fatal errors.
+        instance_url: Salesforce instance URL for download_url construction.
+
     Returns:
-        DownloadStats.to_dict()
+        DownloadStats.to_dict() with added 'downloaded_entries' key
     """
     if worker_tracker and task_id:
         worker_tracker.register_task(
@@ -183,6 +190,18 @@ def download_batch(
 
     stats = DownloadStats()
     stats.total = len(attachments)
+    downloaded_entries: List[Dict[str, Any]] = []
+
+    def _make_download_url(attachment_id: str) -> str:
+        if instance_url:
+            return f"{instance_url}/servlet/servlet.FileDownload?file={attachment_id}"
+        return ""
+
+    def _append_to_report(entry: Dict[str, Any]) -> None:
+        """Append entry to shared report_entries under lock."""
+        if report_entries is not None:
+            with report_entries['lock']:
+                report_entries['entries'].append(entry)
 
     sf_client = connection_pool.get_connection()
     try:
@@ -210,6 +229,18 @@ def download_batch(
                 stats.success += 1
                 stats.completed += 1
                 stats.bytes_transferred += result_bytes
+
+                # Record downloaded entry
+                dl_entry = {
+                    'attachment_id': attachment.id,
+                    'parent_id': attachment.parent_id,
+                    'filename': output_filename,
+                    'object_name': object_name,
+                    'download_url': _make_download_url(attachment.id),
+                    'body_length': attachment.body_length,
+                }
+                downloaded_entries.append(dl_entry)
+                _append_to_report(dl_entry)
 
                 # Update worker tracker after successful download
                 if worker_tracker and task_id:
@@ -240,12 +271,26 @@ def download_batch(
 
             except (SFNetworkError, SFAuthError) as e:
                 logger.error(f"Fatal error downloading {attachment.id}: {e}")
+                error_type = 'SFAuthError' if isinstance(e, SFAuthError) else 'SFNetworkError'
                 stats.failed += 1
                 stats.completed += 1
-                stats.errors.append({
+                err_entry = {
                     'id': attachment.id,
+                    'parent_id': attachment.parent_id,
                     'name': attachment.name,
-                    'error': str(e)
+                    'error': str(e),
+                    'error_type': error_type,
+                    'output_filename': output_filename,
+                }
+                stats.errors.append(err_entry)
+                _append_to_report({
+                    'attachment_id': attachment.id,
+                    'parent_id': attachment.parent_id,
+                    'filename': output_filename,
+                    'object_name': object_name,
+                    'download_url': _make_download_url(attachment.id),
+                    'error': str(e),
+                    'error_type': error_type,
                 })
                 if completed_counter:
                     with completed_counter['lock']:
@@ -256,10 +301,23 @@ def download_batch(
                 logger.error(f"API error downloading {attachment.id}: {e}")
                 stats.failed += 1
                 stats.completed += 1
-                stats.errors.append({
+                err_entry = {
                     'id': attachment.id,
+                    'parent_id': attachment.parent_id,
                     'name': attachment.name,
-                    'error': str(e)
+                    'error': str(e),
+                    'error_type': 'SFAPIError',
+                    'output_filename': output_filename,
+                }
+                stats.errors.append(err_entry)
+                _append_to_report({
+                    'attachment_id': attachment.id,
+                    'parent_id': attachment.parent_id,
+                    'filename': output_filename,
+                    'object_name': object_name,
+                    'download_url': _make_download_url(attachment.id),
+                    'error': str(e),
+                    'error_type': 'SFAPIError',
                 })
                 if completed_counter:
                     with completed_counter['lock']:
@@ -272,12 +330,23 @@ def download_batch(
                 )
                 stats.failed += 1
                 stats.completed += 1
-                stats.errors.append({
+                err_entry = {
                     'id': attachment.id,
                     'parent_id': attachment.parent_id,
                     'name': attachment.name,
                     'error': str(e),
-                    'error_type': 'OSError'
+                    'error_type': 'OSError',
+                    'output_filename': output_filename,
+                }
+                stats.errors.append(err_entry)
+                _append_to_report({
+                    'attachment_id': attachment.id,
+                    'parent_id': attachment.parent_id,
+                    'filename': output_filename,
+                    'object_name': object_name,
+                    'download_url': _make_download_url(attachment.id),
+                    'error': str(e),
+                    'error_type': 'OSError',
                 })
                 if completed_counter:
                     with completed_counter['lock']:
@@ -292,4 +361,6 @@ def download_batch(
         f"Batch complete: {stats.success} downloaded, {stats.failed} failed"
     )
 
-    return stats.to_dict()
+    result = stats.to_dict()
+    result['downloaded_entries'] = downloaded_entries
+    return result

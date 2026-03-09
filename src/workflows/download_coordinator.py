@@ -25,9 +25,8 @@ from src.api.usage_monitor import SalesforceUsageMonitor
 from src.download.filename import (
     detect_filename_collisions, build_output_filename, FilenameInfo
 )
-from src.download.scan import (
-    scan_existing_files, load_skipped_attachment_ids, write_skipped_files_report
-)
+from src.download.scan import scan_existing_files, load_skipped_attachment_ids
+from src.report.writer import REPORT_MISSING
 from src.progress.worker_tracker import WorkerActivityTracker
 
 logger = logging.getLogger(__name__)
@@ -42,6 +41,14 @@ class DownloadResult:
     failed_count: int
     errors: List[Dict[str, Any]]
     total_attachments: int
+    downloaded_entries: List[Dict[str, Any]] = None
+    error_entries: List[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        if self.downloaded_entries is None:
+            self.downloaded_entries = []
+        if self.error_entries is None:
+            self.error_entries = []
 
 
 @dataclass
@@ -173,7 +180,7 @@ def coordinate_all_downloads(
         worker_tracker.clear_all_tasks()
 
     # Hoist shared state
-    skipped_files_path = output_dir / 'skipped_files.json'
+    report_missing_path = output_dir / REPORT_MISSING
 
     # ================================================================
     # PASS 1: PREP — scan, collision detection, split for all objects
@@ -195,7 +202,7 @@ def coordinate_all_downloads(
 
             # Scan existing + load skipped IDs (per-object read)
             existing = scan_existing_files(output_obj_dir)
-            skipped_ids = load_skipped_attachment_ids(skipped_files_path)
+            skipped_ids = load_skipped_attachment_ids(report_missing_path)
 
             to_download_batches, skipped_existing, skipped_permanent = split_batches(
                 obj_result.batches, filename_info_map, existing, skipped_ids
@@ -251,8 +258,16 @@ def coordinate_all_downloads(
 
     all_download_results = []
 
+    def _make_download_url(attachment_id: str) -> str:
+        if instance_url:
+            return f"{instance_url}/servlet/servlet.FileDownload?file={attachment_id}"
+        return ""
+
     for prep in prep_results:
         obj_result = prep.obj_result
+
+        # Shared report entries container for fatal error preservation
+        report_entries: Dict[str, Any] = {'entries': [], 'lock': Lock()}
 
         # Submit per-batch workers
         for batch in prep.to_download_batches:
@@ -266,6 +281,7 @@ def coordinate_all_downloads(
                     connection_pool, error_handler, usage_monitor,
                     download_stage, completed_counter,
                     worker_tracker, dl_task_id, obj_result.csv_name, batch.batch_idx,
+                    report_entries, instance_url,
                 )
             )
 
@@ -280,6 +296,8 @@ def coordinate_all_downloads(
         total_downloaded = 0
         total_failed = 0
         all_errors: List[Dict[str, Any]] = []
+        obj_downloaded_entries: List[Dict[str, Any]] = []
+        obj_error_entries: List[Dict[str, Any]] = []
 
         # Exact-match lookup: task_id -> batch
         batch_by_task = {
@@ -289,20 +307,68 @@ def coordinate_all_downloads(
 
         for wr in worker_results:
             if wr.success and wr.result:
+                # Successful batch — use wr.result data
                 total_downloaded += wr.result['success']
                 total_failed += wr.result['failed']
                 all_errors.extend(wr.result.get('errors', []))
+                obj_downloaded_entries.extend(wr.result.get('downloaded_entries', []))
+
+                # Build error entries from normalized error dicts
+                for err in wr.result.get('errors', []):
+                    obj_error_entries.append({
+                        'attachment_id': err.get('id', ''),
+                        'parent_id': err.get('parent_id', ''),
+                        'filename': err.get('output_filename', err.get('name', '')),
+                        'object_name': obj_result.csv_name,
+                        'download_url': _make_download_url(err.get('id', '')),
+                        'error': err.get('error', ''),
+                        'error_type': err.get('error_type', 'Unknown'),
+                    })
+
             elif not wr.success:
-                # Failed worker (e.g. SFNetworkError/SFAuthError)
+                # Failed batch — wr.result is None, use report_entries
                 batch = batch_by_task.get(wr.task_id)
-                batch_size = len(batch.attachments) if batch else 0
+                if not batch:
+                    logger.error(f"Batch worker {wr.task_id} failed: {wr.error}")
+                    continue
+
+                batch_attachment_ids = {a.id for a in batch.attachments}
+                batch_size = len(batch.attachments)
                 total_failed += batch_size
                 logger.error(f"Batch worker {wr.task_id} failed: {wr.error}")
 
-        # Write skipped_files.json for OS errors
-        os_errors = [e for e in all_errors if e.get('error_type') == 'OSError']
-        if os_errors:
-            write_skipped_files_report(os_errors, skipped_files_path, instance_url)
+                # Filter report_entries to this batch's attachments only
+                batch_report = [
+                    e for e in report_entries['entries']
+                    if e.get('attachment_id') in batch_attachment_ids
+                ]
+
+                # Separate downloaded vs error entries from shared container
+                processed_ids = set()
+                for entry in batch_report:
+                    processed_ids.add(entry['attachment_id'])
+                    if entry.get('error'):
+                        obj_error_entries.append(entry)
+                    else:
+                        obj_downloaded_entries.append(entry)
+                        total_downloaded += 1
+                        total_failed -= 1  # Adjust: was counted as failed above
+
+                # Create BatchAborted entries for unprocessed attachments
+                for attachment in batch.attachments:
+                    if attachment.id not in processed_ids:
+                        output_filename = build_output_filename(
+                            attachment, prep.filename_info_map
+                        )
+                        obj_error_entries.append({
+                            'attachment_id': attachment.id,
+                            'parent_id': attachment.parent_id,
+                            'filename': output_filename,
+                            'object_name': obj_result.csv_name,
+                            'download_url': _make_download_url(attachment.id),
+                            'error': 'Batch aborted due to fatal error',
+                            'error_type': 'BatchAborted',
+                        })
 
         obj_skipped = prep.skipped_existing + prep.skipped_permanent
         all_download_results.append(DownloadResult(
@@ -312,6 +378,8 @@ def coordinate_all_downloads(
             failed_count=total_failed,
             errors=all_errors,
             total_attachments=obj_result.total_attachments,
+            downloaded_entries=obj_downloaded_entries,
+            error_entries=obj_error_entries,
         ))
 
         # Cleanup after everything is done for this object

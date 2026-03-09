@@ -38,6 +38,9 @@ from src.workflows.thread_pool import ThreadPoolConfig, WorkflowThreadPool
 # Worker activity tracking
 from src.progress.worker_tracker import WorkerActivityTracker
 
+# Execution reports
+from src.report.writer import ReportEntry, write_reports
+
 logger = logging.getLogger(__name__)
 
 
@@ -209,6 +212,49 @@ def process(
             workflow_error_handler.handle_query_error("all_queries", e)
             raise
         
+        # ============================================================
+        # WRITE EXECUTION REPORTS
+        # ============================================================
+        if download:
+            try:
+                all_downloaded = []
+                all_missing = []
+                for dr in download_results:
+                    for entry in dr.downloaded_entries:
+                        all_downloaded.append(ReportEntry(**entry))
+                    for entry in dr.error_entries:
+                        all_missing.append(ReportEntry(
+                            attachment_id=entry.get('attachment_id', ''),
+                            parent_id=entry.get('parent_id', ''),
+                            filename=entry.get('filename', ''),
+                            object_name=entry.get('object_name', ''),
+                            download_url=entry.get('download_url', ''),
+                            error=entry.get('error'),
+                            error_type=entry.get('error_type'),
+                        ))
+
+                stages_info = {
+                    'csv_processing': {
+                        'files_processed': len(csv_records),
+                        'total_records': sum(c.total_records for c in csv_records),
+                    },
+                    'soql_query': {
+                        'total_batches': sum(c.total_batches for c in csv_records),
+                        'total_attachments': sum(qr.total_attachments for qr in query_results),
+                    },
+                }
+
+                write_reports(
+                    output_dir=output_dir,
+                    downloaded=all_downloaded,
+                    missing=all_missing,
+                    instance_url=connection_pool.instance_url,
+                    stages_info=stages_info,
+                    total_queried=sum(qr.total_attachments for qr in query_results),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to write execution reports: {e}")
+
         # ============================================================
         # FINALIZE & AGGREGATE STATISTICS
         # ============================================================
