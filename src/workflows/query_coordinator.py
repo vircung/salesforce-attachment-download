@@ -22,6 +22,7 @@ from src.exceptions import SFQueryError
 from src.workflows.common import ensure_directories
 from src.query.filters import ParentIdFilter, build_soql_where_clause
 from src.query.soql_simple import query_attachments_with_simple_salesforce
+from src.progress.worker_tracker import WorkerActivityTracker
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ def execute_all_csv_queries(
     error_handler: SalesforceErrorHandler,
     usage_monitor: SalesforceUsageMonitor,
     save_metadata: bool = False,
+    *,
+    worker_tracker: Optional[WorkerActivityTracker] = None,
 ) -> List[ObjectQueryResult]:
     """
     Execute queries for ALL CSVs using threading.
@@ -53,6 +56,7 @@ def execute_all_csv_queries(
         error_handler: Error handler for retry logic
         usage_monitor: API usage monitor
         save_metadata: If True, write batch CSVs to disk
+        worker_tracker: Optional worker activity tracker
 
     Returns:
         List[ObjectQueryResult] in same order as csv_records
@@ -79,6 +83,7 @@ def execute_all_csv_queries(
         error_handler=error_handler,
         usage_monitor=usage_monitor,
         save_metadata=save_metadata,
+        worker_tracker=worker_tracker,
     )
 
 
@@ -92,6 +97,8 @@ def execute_all_batches_threaded(
     error_handler: SalesforceErrorHandler,
     usage_monitor: SalesforceUsageMonitor,
     save_metadata: bool = False,
+    *,
+    worker_tracker: Optional[WorkerActivityTracker] = None,
 ) -> List[ObjectQueryResult]:
     """
     Execute all batch queries for ALL CSVs using threading.
@@ -138,6 +145,7 @@ def execute_all_batches_threaded(
                     error_handler,
                     usage_monitor,
                     save_metadata,
+                    worker_tracker,
                 )
             )
         cumulative_batch_num += csv_info.total_batches
@@ -199,6 +207,7 @@ def _execute_single_batch(
     error_handler: SalesforceErrorHandler,
     usage_monitor: SalesforceUsageMonitor,
     save_metadata: bool = False,
+    worker_tracker: Optional[WorkerActivityTracker] = None,
 ) -> tuple:
     """
     Execute a single batch query in a worker thread.
@@ -206,59 +215,77 @@ def _execute_single_batch(
     Returns:
         Tuple of (csv_name, BatchResult)
     """
-    logger.debug(f"Executing batch {batch_id}: {len(id_batch)} ParentId(s)")
+    if worker_tracker:
+        worker_tracker.register_task(
+            batch_id, "SOQL", csv_info.csv_name, batch_idx, len(id_batch)
+        )
 
-    # Update progress before query execution
-    soql_stage.update_batch(
-        completed_batches=completed_counter['count'],
-        current_batch=cumulative_batch_num,
-        batch_size=len(id_batch)
-    )
+    try:
+        logger.debug(f"Executing batch {batch_id}: {len(id_batch)} ParentId(s)")
 
-    # Build WHERE clause
-    filter_config = ParentIdFilter(
-        prefixes=[],
-        exact_ids=id_batch,
-        strategy='soql'
-    )
-    where_clause = build_soql_where_clause(filter_config)
+        if worker_tracker:
+            worker_tracker.update_task(batch_id, 0, "querying...")
 
-    # Construct metadata CSV path when save_metadata=True
-    metadata_csv_path = None
-    if save_metadata and metadata_output_dir:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-        metadata_csv_path = metadata_output_dir / f"batch_{batch_idx}_{timestamp}.csv"
+        # Update progress before query execution
+        soql_stage.update_batch(
+            completed_batches=completed_counter['count'],
+            current_batch=cumulative_batch_num,
+            batch_size=len(id_batch)
+        )
 
-    # Execute query — returns List[AttachmentRecord]
-    attachment_records = query_attachments_with_simple_salesforce(
-        org_alias=org_alias,
-        where_clause=where_clause,
-        connection_pool=connection_pool,
-        error_handler=error_handler,
-        usage_monitor=usage_monitor,
-        save_metadata=save_metadata,
-        metadata_csv_path=metadata_csv_path,
-    )
+        # Build WHERE clause
+        filter_config = ParentIdFilter(
+            prefixes=[],
+            exact_ids=id_batch,
+            strategy='soql'
+        )
+        where_clause = build_soql_where_clause(filter_config)
 
-    attachment_count = len(attachment_records)
+        # Construct metadata CSV path when save_metadata=True
+        metadata_csv_path = None
+        if save_metadata and metadata_output_dir:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            metadata_csv_path = metadata_output_dir / f"batch_{batch_idx}_{timestamp}.csv"
 
-    # Update counter atomically
-    with completed_counter['lock']:
-        completed_counter['count'] += 1
-        completed_counter['total_attachments'] += attachment_count
+        # Execute query — returns List[AttachmentRecord]
+        attachment_records = query_attachments_with_simple_salesforce(
+            org_alias=org_alias,
+            where_clause=where_clause,
+            connection_pool=connection_pool,
+            error_handler=error_handler,
+            usage_monitor=usage_monitor,
+            save_metadata=save_metadata,
+            metadata_csv_path=metadata_csv_path,
+        )
 
-    # Complete batch
-    soql_stage.complete_batch(
-        batch_num=cumulative_batch_num,
-        records_found=attachment_count,
-        total_attachments=completed_counter['total_attachments']
-    )
+        attachment_count = len(attachment_records)
 
-    logger.info(f"Batch {batch_id} completed: {attachment_count} attachment(s)")
+        if worker_tracker:
+            worker_tracker.update_task(
+                batch_id, attachment_count, f"done, {attachment_count} found"
+            )
 
-    batch_result = BatchResult(
-        batch_idx=batch_idx,
-        attachments=attachment_records,
-    )
+        # Update counter atomically
+        with completed_counter['lock']:
+            completed_counter['count'] += 1
+            completed_counter['total_attachments'] += attachment_count
 
-    return (csv_info.csv_name, batch_result)
+        # Complete batch
+        soql_stage.complete_batch(
+            batch_num=cumulative_batch_num,
+            records_found=attachment_count,
+            total_attachments=completed_counter['total_attachments']
+        )
+
+        logger.info(f"Batch {batch_id} completed: {attachment_count} attachment(s)")
+
+        batch_result = BatchResult(
+            batch_idx=batch_idx,
+            attachments=attachment_records,
+        )
+
+        return (csv_info.csv_name, batch_result)
+
+    finally:
+        if worker_tracker:
+            worker_tracker.unregister_task(batch_id)

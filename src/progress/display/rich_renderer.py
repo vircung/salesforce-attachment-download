@@ -22,6 +22,7 @@ from rich.text import Text
 
 from src.progress.core.tracker import ProgressRenderer
 from src.progress.core.stage import StageStatus, StageProgress
+from src.progress.worker_tracker import WorkerActivityTracker
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +39,22 @@ class RichProgressRenderer(ProgressRenderer):
     - Real-time updates
     """
 
-    def __init__(self, console: Optional[Console] = None) -> None:
+    def __init__(
+        self,
+        console: Optional[Console] = None,
+        worker_tracker: Optional[WorkerActivityTracker] = None,
+    ) -> None:
         """
         Initialize Rich progress renderer.
         
         Args:
             console: Optional Rich console instance
+            worker_tracker: Optional worker activity tracker for worker panel
         """
         self.console = console or Console()
         self._lock = RLock()
+        self._worker_tracker = worker_tracker
+        self._keyboard_listener = None
         self._live: Optional[Live] = None
         self._progress = Progress(
             SpinnerColumn(),
@@ -133,9 +141,38 @@ class RichProgressRenderer(ProgressRenderer):
             # Force initial render with all stages visible
             self._update_live_display()
 
+            # Start keyboard listener if tracker already set
+            self._try_start_keyboard_listener()
+
+    def set_worker_tracker(self, tracker: WorkerActivityTracker) -> None:
+        """Set the worker tracker and start keyboard listener if Live is running."""
+        with self._lock:
+            self._worker_tracker = tracker
+            if self._live is not None:
+                self._try_start_keyboard_listener()
+
+    def _try_start_keyboard_listener(self) -> None:
+        """Start keyboard listener if tracker is set and listener not yet running."""
+        if self._worker_tracker is None or self._keyboard_listener is not None:
+            return
+        try:
+            from src.progress.keyboard_listener import KeyboardListener
+            self._keyboard_listener = KeyboardListener(self._worker_tracker)
+            self._keyboard_listener.start()
+        except Exception as e:
+            logger.debug("Could not start keyboard listener: %s", e)
+
     def stop(self) -> None:
         """Stop the Rich progress display."""
         with self._lock:
+            # Stop keyboard listener first
+            if self._keyboard_listener is not None:
+                try:
+                    self._keyboard_listener.stop()
+                except Exception:
+                    pass
+                self._keyboard_listener = None
+
             if self._live is not None:
                 # Process any pending updates before stopping
                 if self._pending_updates:
@@ -367,10 +404,10 @@ class RichProgressRenderer(ProgressRenderer):
             expand=True
         )
         
-        # Detailed information table
-        details_table = self._create_details_table(panel_width)
+        # Detailed information table + worker activity
+        details_content = self._create_details_content(panel_width)
         details_panel = Panel(
-            details_table,
+            details_content,
             title="Stage Details",
             border_style="dim",
             padding=(0, 1),
@@ -397,6 +434,78 @@ class RichProgressRenderer(ProgressRenderer):
         main_table.add_row(stats_panel)
         
         return main_table
+
+    def _create_details_content(self, panel_width: int):
+        """Create details panel content: stage table + worker activity."""
+        details_table = self._create_details_table(panel_width)
+
+        # Build a vertical grid with stage table + optional worker section
+        content = Table.grid(padding=0, expand=True)
+        content.add_column(ratio=1)
+        content.add_row(details_table)
+
+        tracker = self._worker_tracker
+        if tracker is None:
+            return content
+
+        # Determine if worker panel should be visible:
+        # - keyboard available: user toggles with [w], hidden by default
+        # - keyboard unavailable: always show (no way to toggle)
+        show_workers = tracker.show_panel or not tracker.keyboard_available
+
+        # Hint line (only when keyboard listener is available)
+        if tracker.keyboard_available:
+            if tracker.show_panel:
+                hint = Text("Press [w] to hide worker details", style="dim italic")
+            else:
+                hint = Text("Press [w] to show worker details", style="dim italic")
+            content.add_row(hint)
+
+        # Worker activity table
+        if show_workers:
+            worker_table = self._create_worker_table(panel_width, tracker)
+            content.add_row(worker_table)
+
+        return content
+
+    def _create_worker_table(self, panel_width: int, tracker: "WorkerActivityTracker") -> Table:
+        """Create the worker activity table."""
+        table_width = max(80, panel_width - 4)
+        table = Table(
+            show_header=True,
+            header_style="bold",
+            expand=True,
+            width=table_width,
+            title="Active Workers",
+            title_style="bold cyan",
+        )
+        table.add_column("Phase", style="magenta", no_wrap=True, width=10)
+        table.add_column("Task", style="white", no_wrap=True, ratio=1)
+        table.add_column("Progress", style="blue", no_wrap=True, width=20)
+
+        tasks = tracker.get_active_tasks()
+
+        if not tasks:
+            table.add_row("", Text("No active workers", style="dim"), "")
+            return table
+
+        for task in tasks:
+            # Task description: "ObjectName - batch N"
+            task_desc = f"{task.object_name} - batch {task.batch_idx}"
+
+            # Progress column depends on phase
+            if task.phase == "SOQL":
+                progress_text = task.status or "querying..."
+            else:
+                # Download: "5/100"
+                if task.progress_total > 0:
+                    progress_text = f"{task.progress_current}/{task.progress_total}"
+                else:
+                    progress_text = task.status or "starting"
+
+            table.add_row(task.phase, task_desc, progress_text)
+
+        return table
 
     def _create_details_table(self, panel_width: int) -> Table:
         """Create detailed information table."""

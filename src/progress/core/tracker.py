@@ -119,6 +119,12 @@ class ProgressTracker:
         with self._lock:
             self._renderer = renderer
 
+    def set_worker_tracker(self, tracker) -> None:
+        """Set the worker activity tracker on the renderer (if Rich)."""
+        with self._lock:
+            if self._renderer is not None and hasattr(self._renderer, 'set_worker_tracker'):
+                self._renderer.set_worker_tracker(tracker)
+
     def start(self) -> None:
         """Start progress tracking and display."""
         with self._lock:

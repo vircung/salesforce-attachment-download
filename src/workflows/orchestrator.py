@@ -35,6 +35,9 @@ from src.workflows.error_handler import WorkflowErrorHandler
 # Thread pool support
 from src.workflows.thread_pool import ThreadPoolConfig, WorkflowThreadPool
 
+# Worker activity tracking
+from src.progress.worker_tracker import WorkerActivityTracker
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,12 +112,16 @@ def process(
         download_prep_stage = DownloadPrepStage()
         download_stage = DownloadStage()
         
+        # Worker activity tracker (Rich-only)
+        worker_tracker = WorkerActivityTracker()
+        
         # Add to tracker if provided
         if progress_tracker:
             progress_tracker.add_stage(csv_stage)
             progress_tracker.add_stage(soql_stage)
             progress_tracker.add_stage(download_prep_stage)
             progress_tracker.add_stage(download_stage)
+            progress_tracker.set_worker_tracker(worker_tracker)
         
         # Initialize error handlers
         workflow_error_handler = WorkflowErrorHandler(
@@ -176,6 +183,7 @@ def process(
                     error_handler=error_handler,
                     usage_monitor=usage_monitor,
                     save_metadata=save_metadata,
+                    worker_tracker=worker_tracker,
                 )
 
                 # ============================================================
@@ -195,6 +203,7 @@ def process(
                     usage_monitor=usage_monitor,
                     download_enabled=download,
                     download_prep_stage=download_prep_stage,
+                    worker_tracker=worker_tracker,
                 )
         except Exception as e:
             workflow_error_handler.handle_query_error("all_queries", e)

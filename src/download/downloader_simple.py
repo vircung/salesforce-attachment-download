@@ -19,6 +19,7 @@ from src.download.filename import FilenameInfo, build_output_filename, check_fil
 from src.download.stats import DownloadStats
 from src.exceptions import SFAuthError, SFAPIError, SFNetworkError
 from src.progress.stages import DownloadStage
+from src.progress.worker_tracker import WorkerActivityTracker
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,10 @@ def download_batch(
     usage_monitor: Optional[SalesforceUsageMonitor],
     progress_stage: Optional[DownloadStage],
     completed_counter: Optional[dict],
+    worker_tracker: Optional[WorkerActivityTracker] = None,
+    task_id: str = "",
+    object_name: str = "",
+    batch_idx: int = 0,
 ) -> Dict[str, Any]:
     """Download a batch of attachments from in-memory data.
 
@@ -171,14 +176,25 @@ def download_batch(
     Returns:
         DownloadStats.to_dict()
     """
+    if worker_tracker and task_id:
+        worker_tracker.register_task(
+            task_id, "Download", object_name, batch_idx, len(attachments)
+        )
+
     stats = DownloadStats()
     stats.total = len(attachments)
 
     sf_client = connection_pool.get_connection()
     try:
-        for attachment in attachments:
+        for file_idx, attachment in enumerate(attachments):
             output_filename = build_output_filename(attachment, filename_info_map)
             output_path = output_dir / output_filename
+
+            # Update worker tracker with current file
+            if worker_tracker and task_id:
+                worker_tracker.update_task(
+                    task_id, file_idx, "downloading", attachment.name
+                )
 
             try:
                 # Check filename length before attempting download
@@ -194,6 +210,12 @@ def download_batch(
                 stats.success += 1
                 stats.completed += 1
                 stats.bytes_transferred += result_bytes
+
+                # Update worker tracker after successful download
+                if worker_tracker and task_id:
+                    worker_tracker.update_task(
+                        task_id, file_idx + 1, "downloading", attachment.name
+                    )
 
                 # Update progress
                 if progress_stage:
@@ -263,6 +285,8 @@ def download_batch(
 
     finally:
         connection_pool.return_connection(sf_client)
+        if worker_tracker and task_id:
+            worker_tracker.unregister_task(task_id)
 
     logger.info(
         f"Batch complete: {stats.success} downloaded, {stats.failed} failed"

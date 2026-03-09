@@ -28,6 +28,7 @@ from src.download.filename import (
 from src.download.scan import (
     scan_existing_files, load_skipped_attachment_ids, write_skipped_files_report
 )
+from src.progress.worker_tracker import WorkerActivityTracker
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,7 @@ def coordinate_all_downloads(
     download_enabled: bool = True,
     *,
     download_prep_stage: Optional[DownloadPrepStage] = None,
+    worker_tracker: Optional[WorkerActivityTracker] = None,
 ) -> List[DownloadResult]:
     """
     Coordinate download of all attachments.
@@ -165,6 +167,10 @@ def coordinate_all_downloads(
 
     # Clear stale results from query phase
     thread_pool.clear_results()
+
+    # Clear worker tracker from SOQL phase
+    if worker_tracker:
+        worker_tracker.clear_all_tasks()
 
     # Hoist shared state
     skipped_files_path = output_dir / 'skipped_files.json'
@@ -250,14 +256,16 @@ def coordinate_all_downloads(
 
         # Submit per-batch workers
         for batch in prep.to_download_batches:
+            dl_task_id = f"download_{obj_result.csv_name}_batch_{batch.batch_idx}"
             thread_pool.submit_task(
-                task_id=f"download_{obj_result.csv_name}_batch_{batch.batch_idx}",
+                task_id=dl_task_id,
                 fn=download_batch,
                 max_retries=1,
                 args=(
                     batch.attachments, prep.output_obj_dir, prep.filename_info_map,
                     connection_pool, error_handler, usage_monitor,
-                    download_stage, completed_counter
+                    download_stage, completed_counter,
+                    worker_tracker, dl_task_id, obj_result.csv_name, batch.batch_idx,
                 )
             )
 
