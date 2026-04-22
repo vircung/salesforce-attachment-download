@@ -10,46 +10,11 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Literal, NoReturn, Any
-from threading import Lock
 
 from src.exceptions import SFQueryError, SFAuthError
+from src.query.soql_simple import ATTACHMENT_FIELDS, build_attachment_query  # noqa: F401
 
 logger = logging.getLogger(__name__)
-
-# Thread-safe flag to track if query template details have been logged
-_query_logged_lock = Lock()
-_query_logged = False
-
-# Salesforce Attachment fields to query
-ATTACHMENT_FIELDS = [
-    'Id',
-    'Name',
-    'ContentType',
-    'BodyLength',
-    'ParentId',
-    'CreatedDate',
-    'LastModifiedDate',
-    'Description'
-]
-
-
-def build_attachment_query(where_clause: str) -> str:
-    """
-    Build SOQL query for Attachment records.
-    
-    Args:
-        where_clause: WHERE clause (e.g., "WHERE ParentId IN ('id1','id2')")
-    
-    Returns:
-        Complete SOQL query string
-        
-    Example:
-        >>> build_attachment_query("WHERE ParentId IN ('001xxx')")
-        "SELECT Id, Name, ... FROM Attachment WHERE ParentId IN ('001xxx') ORDER BY ..."
-    """
-    fields = ', '.join(ATTACHMENT_FIELDS)
-    query = f"SELECT {fields} FROM Attachment {where_clause} ORDER BY ParentId, CreatedDate DESC"
-    return query
 
 
 def execute_soql_query(
