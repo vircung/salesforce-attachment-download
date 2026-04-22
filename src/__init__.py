@@ -13,7 +13,7 @@ from src.query.filters import ParentIdFilter, apply_parent_id_filter, build_soql
 from src.query.soql import execute_soql_query, query_attachments_with_filter, build_attachment_query
 
 # CSV
-from src.constants import CsvRecordInfo
+from src.models import CsvRecordInfo
 from src.csv.utils import process_records_directory
 from src.csv.validator import validate_metadata_csv
 

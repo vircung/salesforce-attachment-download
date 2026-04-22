@@ -11,7 +11,7 @@ from typing import List, Optional
 from datetime import datetime
 from threading import Lock
 
-from src.constants import CsvRecordInfo
+from src.models import CsvRecordInfo
 from src.models import BatchResult, ObjectQueryResult
 from src.progress.stages import SoqlQueryStage
 from src.workflows.thread_pool import WorkflowThreadPool

@@ -254,7 +254,7 @@ def prepare_csv_record_info(
         FileNotFoundError: If CSV file doesn't exist
         ValueError: If CSV structure is invalid or batch_size < 1
     """
-    from src.constants import CsvRecordInfo  # Import here to avoid circular import
+    from src.models import CsvRecordInfo  # Import here to avoid circular import
 
     logger.debug(f"Processing CSV file: {csv_path.name}")
 

@@ -8,7 +8,7 @@ Responsible for discovering all CSV files and preparing them for querying.
 import logging
 from pathlib import Path
 from typing import List, Optional
-from src.constants import CsvRecordInfo
+from src.models import CsvRecordInfo
 from src.csv.utils import process_records_directory
 from src.progress.stages import CsvProcessingStage
 from src.progress.core import ProgressTracker
