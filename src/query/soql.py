@@ -9,7 +9,7 @@ import subprocess
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Literal, NoReturn, Any
+from typing import Literal, NoReturn, Any, Optional
 
 from src.exceptions import SFQueryError, SFAuthError
 from src.query.soql_simple import ATTACHMENT_FIELDS, build_attachment_query  # noqa: F401
@@ -96,7 +96,8 @@ def execute_soql_query(
             
             # Count records and log success
             record_count = _count_records(output_file, result_format)
-            logger.info(f"✓ Query successful: {record_count} records saved to {output_file.name}")
+            count_str = str(record_count) if record_count is not None else "unknown"
+            logger.info(f"✓ Query successful: {count_str} records saved to {output_file.name}")
             
             return output_file
         
@@ -151,25 +152,16 @@ def _validate_output(output_file: Path, result_format: str) -> None:
         )
 
 
-def _count_records(output_file: Path, result_format: str) -> int:
+def _count_records(output_file: Path, result_format: str) -> Optional[int]:
     """
     Count the number of records in the output file.
-    
-    Args:
-        output_file: Path to output file
-        result_format: Format (csv or json)
-    
-    Returns:
-        Number of records (excluding header for CSV)
+
+    Returns None when the count cannot be determined (e.g. JSON format).
     """
     if result_format == 'csv':
         lines = output_file.read_text(encoding='utf-8').splitlines()
-        # CSV: first line is header, rest are records
-        record_count = max(0, len(lines) - 1)
-        return record_count
-    else:
-        # For JSON, we'd need to parse it - simplified for now
-        return -1  # Unknown
+        return max(0, len(lines) - 1)
+    return None
 
 
 def _handle_query_error(result: subprocess.CompletedProcess[Any], query: str, org_alias: str) -> NoReturn:
