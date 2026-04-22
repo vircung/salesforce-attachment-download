@@ -176,8 +176,8 @@ def process(
         # PHASE 2: SOQL QUERYING (ALL CSVs)
         # ============================================================
         log_section_header(WorkflowPhase.SOQL_QUERYING)
-        try:
-            with thread_pool:
+        with thread_pool:
+            try:
                 query_results = execute_all_csv_queries(
                     csv_records=csv_records,
                     org_alias=org_alias,
@@ -190,12 +190,15 @@ def process(
                     save_metadata=save_metadata,
                     worker_tracker=worker_tracker,
                 )
+            except Exception as e:
+                workflow_error_handler.handle_query_error("all_queries", e)
+                raise
 
-                # ============================================================
-                # PHASE 3: DOWNLOADS (ALL CSVs)
-                # ============================================================
-                log_section_header(WorkflowPhase.DOWNLOADS)
-                download_results = []
+            # ============================================================
+            # PHASE 3: DOWNLOADS (ALL CSVs)
+            # ============================================================
+            log_section_header(WorkflowPhase.DOWNLOADS)
+            try:
                 from src.workflows.download_coordinator import coordinate_all_downloads
                 download_results = coordinate_all_downloads(
                     object_results=query_results,
@@ -210,9 +213,9 @@ def process(
                     download_prep_stage=download_prep_stage,
                     worker_tracker=worker_tracker,
                 )
-        except Exception as e:
-            workflow_error_handler.handle_query_error("all_queries", e)
-            raise
+            except Exception as e:
+                workflow_error_handler.handle_download_error("all_downloads", e)
+                raise
         
         # ============================================================
         # WRITE EXECUTION REPORTS
