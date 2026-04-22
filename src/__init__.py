@@ -30,7 +30,7 @@ from src.download.filename import FilenameInfo, sanitize_filename, detect_filena
 from src.cli.config import parse_arguments
 
 # Utils
-from src.utils import setup_logging, log_section_header
+from src.utils import log_section_header
 
 __version__ = "0.2.0"
 __all__ = [
@@ -63,6 +63,5 @@ __all__ = [
     # CLI
     "parse_arguments",
     # Utils
-    "setup_logging",
     "log_section_header",
 ]
