@@ -41,22 +41,6 @@ class ThreadPoolConfig:
             self.query_workers = Workers.DEFAULT
 
     @classmethod
-    def from_cli_args(cls, args) -> "ThreadPoolConfig":
-        """Create config from CLI arguments.
-
-        Args:
-            args: Parsed CLI arguments object with query_workers, sync_only, query_timeout attributes
-
-        Returns:
-            ThreadPoolConfig instance
-        """
-        return cls(
-            query_workers=getattr(args, "query_workers", Workers.DEFAULT),
-            sync_only=getattr(args, "sync_only", False),
-            query_timeout=getattr(args, "query_timeout", QueryTimeout.QUERY_TASK),
-        )
-
-    @classmethod
     def from_env(cls) -> "ThreadPoolConfig":
         """Create config from environment variables.
 
