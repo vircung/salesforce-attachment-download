@@ -7,7 +7,6 @@ from src.exceptions import SalesforceError, SFAuthError, SFAPIError, SFQueryErro
 
 # API
 from src.api.sf_auth import get_sf_auth_info
-from src.api.sf_client import SalesforceClient
 
 # Query
 from src.query.filters import ParentIdFilter, apply_parent_id_filter, build_soql_where_clause
@@ -43,7 +42,6 @@ __all__ = [
     "SFQueryError",
     # API
     "get_sf_auth_info",
-    "SalesforceClient",
     # Query
     "ParentIdFilter",
     "apply_parent_id_filter",
