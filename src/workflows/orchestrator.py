@@ -295,18 +295,10 @@ def process(
         # Return statistics as dictionary
         return stats
     
-    except SFAuthError as e:
+    except (SFAuthError, SFQueryError, SFAPIError) as e:
         WorkflowExceptionHandler.handle_and_log(e)
         raise
-    
-    except SFQueryError as e:
-        WorkflowExceptionHandler.handle_and_log(e)
-        raise
-    
-    except SFAPIError as e:
-        WorkflowExceptionHandler.handle_and_log(e)
-        raise
-    
+
     except Exception as e:
         logger.error(f"Unexpected workflow error: {e}")
         logger.debug("Full error details:", exc_info=True)
