@@ -52,11 +52,14 @@ def sanitize_filename(filename: str) -> str:
     for char in invalid_chars:
         filename = filename.replace(char, '_')
 
-    # Limit length to maximum supported by most filesystems
-    if len(filename) > MAX_FILENAME_LENGTH:
+    # Limit length to filesystem maximum, counting UTF-8 bytes (ext4 limit is bytes, not chars)
+    if len(filename.encode('utf-8')) > MAX_FILENAME_LENGTH:
         name, ext = filename.rsplit('.', 1) if '.' in filename else (filename, '')
-        max_name_length = MAX_FILENAME_LENGTH - len(ext) - 1
-        filename = name[:max_name_length] + '.' + ext if ext else name[:MAX_FILENAME_LENGTH]
+        ext_bytes = ext.encode('utf-8')
+        max_name_bytes = MAX_FILENAME_LENGTH - len(ext_bytes) - (1 if ext else 0)
+        # Truncate by bytes; drop any incomplete multibyte sequence at the cut point
+        name_truncated = name.encode('utf-8')[:max_name_bytes].decode('utf-8', errors='ignore')
+        filename = f"{name_truncated}.{ext}" if ext else name_truncated
 
     return filename
 
