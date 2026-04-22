@@ -14,6 +14,7 @@ from typing import Any, Callable, List, Optional
 import concurrent.futures
 
 from src.config_limits import Workers, QueryTimeout, Retry
+from src.exceptions import SFAuthError
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +182,7 @@ class WorkflowThreadPool:
             except Exception as e:
                 last_exception = e
                 logger.warning(f"Task {task_id} failed on attempt {attempt}: {e}")
-                if attempt < max_retries:
+                if attempt < max_retries and not isinstance(e, SFAuthError):
                     delay = Retry.DELAY_FIRST if attempt == 1 else Retry.DELAY_SUBSEQUENT
                     time.sleep(delay)
                     logger.info(f"Retrying task {task_id} after {delay}s delay")
