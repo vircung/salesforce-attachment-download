@@ -10,7 +10,6 @@ from src.api.sf_auth import get_sf_auth_info
 
 # Query
 from src.query.filters import ParentIdFilter, apply_parent_id_filter, build_soql_where_clause
-from src.query.executor import run_query_script_with_filter
 from src.query.soql import execute_soql_query, query_attachments_with_filter, build_attachment_query
 
 # CSV
@@ -46,7 +45,6 @@ __all__ = [
     "ParentIdFilter",
     "apply_parent_id_filter",
     "build_soql_where_clause",
-    "run_query_script_with_filter",
     "execute_soql_query",
     "query_attachments_with_filter",
     "build_attachment_query",
