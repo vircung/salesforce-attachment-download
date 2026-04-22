@@ -286,10 +286,6 @@ def process(
             ]
         }
         
-        # Mark stages as complete (download_stage already completed by coordinator)
-        csv_stage.complete(f"Processed {len(csv_records)} CSV files")
-        soql_stage.complete(f"Completed {stats['total_batches']} batches")
-        
         # Log final summary
         logger.info(f"Total CSV files: {stats['total_csv_files']}")
         logger.info(f"Total records: {stats['total_records']}")
