@@ -82,5 +82,3 @@ class ConnectionPool:
     MIN_POOL_SIZE = 10  # mirrors requests.Session default pool_maxsize
 
 
-class FieldDiscovery:
-    MAX_SUGGESTIONS = 3  # note: param is dead code in _find_similar_fields; no behavior change
