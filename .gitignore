@@ -17,6 +17,8 @@ output/
 logs/
 records/
 
+superpowers/
+
 # IDE
 .vscode/
 .idea/
