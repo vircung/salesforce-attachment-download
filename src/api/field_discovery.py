@@ -15,6 +15,8 @@ from src.api.sf_connection import SalesforceConnectionPool
 from src.api.sf_error_handler import SalesforceErrorHandler
 from src.api.usage_monitor import SalesforceUsageMonitor
 
+from src.config_limits import FieldDiscovery
+
 logger = logging.getLogger(__name__)
 
 
@@ -242,7 +244,7 @@ class SalesforceFieldDiscovery:
             }
         }
 
-    def _find_similar_fields(self, target: str, candidates: List[str], max_suggestions: int = 3) -> Optional[str]:
+    def _find_similar_fields(self, target: str, candidates: List[str], max_suggestions: int = FieldDiscovery.MAX_SUGGESTIONS) -> Optional[str]:
         """Find similar field names using simple string similarity."""
         target_lower = target.lower()
         similarities = []

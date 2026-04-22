@@ -15,13 +15,15 @@ from typing import List, Dict, Tuple, Union
 
 from src.models import AttachmentRecord
 
+from src.config_limits import FileSystem
+
 logger = logging.getLogger(__name__)
 
 # Maximum filename length supported by most filesystems
-MAX_FILENAME_LENGTH = 255
+MAX_FILENAME_LENGTH = FileSystem.MAX_FILENAME_LENGTH
 
 # Default value for attachments without ParentId
-DEFAULT_PARENT_ID = 'NO_PARENT'
+DEFAULT_PARENT_ID = FileSystem.DEFAULT_PARENT_ID
 
 
 @dataclass

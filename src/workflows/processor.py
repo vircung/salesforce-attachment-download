@@ -16,6 +16,8 @@ from src.progress.core import ProgressTracker
 from src.progress.stages import CsvProcessingStage, SoqlQueryStage, DownloadStage
 from src.utils import log_section_header
 
+from src.config_limits import BatchSize
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,7 +25,7 @@ def process_csv_records_workflow(
     org_alias: str,
     output_dir: Path,
     records_dir: Path,
-    batch_size: int = 100,
+    batch_size: int = BatchSize.DEFAULT,
     download: bool = True,
     progress_tracker: Optional[ProgressTracker] = None
 ) -> Dict[str, Any]:

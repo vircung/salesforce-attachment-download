@@ -21,11 +21,13 @@ from src.exceptions import SFAuthError, SFAPIError, SFNetworkError
 from src.progress.stages import DownloadStage
 from src.progress.worker_tracker import WorkerActivityTracker
 
+from src.config_limits import HttpTimeout, FileSystem
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONNECT_TIMEOUT = 10
-DEFAULT_READ_TIMEOUT = 60
-DEFAULT_TMP_DIR_NAME = ".tmp_downloads"
+DEFAULT_CONNECT_TIMEOUT = HttpTimeout.CONNECT
+DEFAULT_READ_TIMEOUT = HttpTimeout.READ
+DEFAULT_TMP_DIR_NAME = FileSystem.TMP_DIR_NAME
 
 
 def download_attachment_simple_salesforce(
@@ -34,7 +36,7 @@ def download_attachment_simple_salesforce(
     sf_client: Salesforce,
     error_handler: Optional[SalesforceErrorHandler] = None,
     usage_monitor: Optional[SalesforceUsageMonitor] = None,
-    chunk_size: int = 8192
+    chunk_size: int = FileSystem.DOWNLOAD_CHUNK_SIZE
 ) -> int:
     """
     Download an attachment file using simple-salesforce.
@@ -85,7 +87,7 @@ def _download_attachment_internal(
     attachment_id: str,
     output_path: Path,
     sf_client: Salesforce,
-    chunk_size: int = 8192
+    chunk_size: int = FileSystem.DOWNLOAD_CHUNK_SIZE
 ) -> int:
     """
     Internal download implementation using simple-salesforce.
@@ -114,7 +116,11 @@ def _download_attachment_internal(
     try:
         attachment_url = f"{sf_client.base_url}sobjects/Attachment/{attachment_id}/Body"
 
-        response = sf_client.session.get(attachment_url, stream=True)
+        response = sf_client.session.get(
+            attachment_url,
+            stream=True,
+            timeout=(DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT),
+        )
 
         if response.status_code == 404:
             logger.error(f"Attachment not found: {attachment_id}")

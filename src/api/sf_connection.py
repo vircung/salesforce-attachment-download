@@ -13,6 +13,8 @@ from simple_salesforce.api import Salesforce
 
 from src.api.sf_auth_adapter import SFCLIAuthAdapter
 
+from src.config_limits import ConnectionPool, Workers
+
 
 def calculate_pool_size(workers: int) -> int:
     """
@@ -29,7 +31,7 @@ def calculate_pool_size(workers: int) -> int:
     """
     # simple-salesforce uses requests.Session (default pool_maxsize=10)
     # For N workers, use max(10, N*2) for safety margin
-    return max(10, workers * 2)
+    return max(ConnectionPool.MIN_POOL_SIZE, workers * 2)
 
 
 class SalesforceConnectionPool:
@@ -40,7 +42,7 @@ class SalesforceConnectionPool:
     reuse across multiple operations and threads.
     """
 
-    def __init__(self, org_alias: Optional[str] = None, workers: int = 2):
+    def __init__(self, org_alias: Optional[str] = None, workers: int = Workers.DEFAULT):
         """
         Initialize the connection pool.
 

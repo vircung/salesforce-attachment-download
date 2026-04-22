@@ -13,6 +13,8 @@ from typing import Any, Callable, List, Optional
 
 import concurrent.futures
 
+from src.config_limits import Workers, QueryTimeout, Retry
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,21 +23,21 @@ class ThreadPoolConfig:
     """Configuration for the workflow thread pool.
 
     Attributes:
-        query_workers: Number of worker threads (1-8, default 2)
+        query_workers: Number of worker threads (Workers.MIN-Workers.MAX, default Workers.DEFAULT)
         sync_only: If True, run tasks synchronously without threading (default False)
-        query_timeout: Timeout in seconds for individual tasks (default 600)
+        query_timeout: Timeout in seconds for individual tasks (default QueryTimeout.QUERY_TASK)
     """
-    query_workers: int = 2
+    query_workers: int = Workers.DEFAULT
     sync_only: bool = False
-    query_timeout: int = 600
+    query_timeout: int = QueryTimeout.QUERY_TASK
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
-        if not 1 <= self.query_workers <= 8:
+        if not Workers.MIN <= self.query_workers <= Workers.MAX:
             logger.warning(
-                f"query_workers {self.query_workers} out of range 1-8, setting to 2"
+                f"query_workers {self.query_workers} out of range {Workers.MIN}-{Workers.MAX}, setting to {Workers.DEFAULT}"
             )
-            self.query_workers = 2
+            self.query_workers = Workers.DEFAULT
 
     @classmethod
     def from_cli_args(cls, args) -> "ThreadPoolConfig":
@@ -48,9 +50,9 @@ class ThreadPoolConfig:
             ThreadPoolConfig instance
         """
         return cls(
-            query_workers=getattr(args, "query_workers", 2),
+            query_workers=getattr(args, "query_workers", Workers.DEFAULT),
             sync_only=getattr(args, "sync_only", False),
-            query_timeout=getattr(args, "query_timeout", 600),
+            query_timeout=getattr(args, "query_timeout", QueryTimeout.QUERY_TASK),
         )
 
     @classmethod
@@ -66,9 +68,9 @@ class ThreadPoolConfig:
             ThreadPoolConfig instance
         """
         return cls(
-            query_workers=int(os.getenv("QUERY_WORKERS", "2")),
+            query_workers=int(os.getenv("QUERY_WORKERS", str(Workers.DEFAULT))),
             sync_only=os.getenv("SYNC_ONLY", "false").lower() == "true",
-            query_timeout=int(os.getenv("QUERY_TIMEOUT", "600")),
+            query_timeout=int(os.getenv("QUERY_TIMEOUT", str(QueryTimeout.QUERY_TASK))),
         )
 
 
@@ -127,7 +129,7 @@ class WorkflowThreadPool:
         task_id: str,
         fn: Callable[..., Any],
         args: tuple,
-        max_retries: int = 3,
+        max_retries: int = Retry.MAX_RETRIES_THREAD,
     ) -> None:
         """Submit a task for execution.
 
@@ -135,7 +137,7 @@ class WorkflowThreadPool:
             task_id: Unique task identifier
             fn: Callable to execute
             args: Arguments to pass to the callable
-            max_retries: Max retry attempts (1 = no retries)
+            max_retries: Max retry attempts (MAX_RETRIES_THREAD=3 means 3 total attempts)
         """
         future = self.executor.submit(
             self._execute_with_retries, task_id, fn, args, max_retries
@@ -180,7 +182,7 @@ class WorkflowThreadPool:
                 last_exception = e
                 logger.warning(f"Task {task_id} failed on attempt {attempt}: {e}")
                 if attempt < max_retries:
-                    delay = 2 if attempt == 1 else 5
+                    delay = Retry.DELAY_FIRST if attempt == 1 else Retry.DELAY_SUBSEQUENT
                     time.sleep(delay)
                     logger.info(f"Retrying task {task_id} after {delay}s delay")
 

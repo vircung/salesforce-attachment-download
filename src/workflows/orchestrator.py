@@ -41,6 +41,8 @@ from src.progress.worker_tracker import WorkerActivityTracker
 # Execution reports
 from src.report.writer import ReportEntry, write_reports
 
+from src.config_limits import Workers, BatchSize
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,10 +50,10 @@ def process(
     org_alias: str,
     output_dir: Path,
     records_dir: Path,
-    batch_size: int = 100,
+    batch_size: int = BatchSize.DEFAULT,
     download: bool = True,
     progress_tracker: Optional[ProgressTracker] = None,
-    workers: int = 2,
+    workers: int = Workers.DEFAULT,
     save_metadata: bool = False,
 ) -> Dict[str, Any]:
     """

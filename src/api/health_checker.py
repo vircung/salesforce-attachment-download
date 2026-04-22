@@ -17,6 +17,8 @@ from src.api.sf_connection import SalesforceConnectionPool
 from src.api.sf_error_handler import SalesforceErrorHandler
 from src.api.usage_monitor import SalesforceUsageMonitor
 
+from src.config_limits import ApiMonitoring
+
 logger = logging.getLogger(__name__)
 
 
@@ -180,7 +182,7 @@ class SalesforceHealthChecker:
         return {
             'remaining_calls': stats.rate_limit_remaining,
             'reset_time': stats.rate_limit_reset,
-            'is_near_limit': stats.rate_limit_remaining is not None and stats.rate_limit_remaining < 100,
+            'is_near_limit': stats.rate_limit_remaining is not None and stats.rate_limit_remaining < ApiMonitoring.NEAR_LIMIT_CALLS,
             'estimated_reset_in_seconds': (
                 stats.rate_limit_reset - time.time()
                 if stats.rate_limit_reset else None
@@ -262,7 +264,7 @@ class SalesforceHealthChecker:
         if not health.get('healthy'):
             recommendations.append("API connectivity issues detected - check authentication and network")
 
-        if health.get('response_time', 0) > 5.0:
+        if health.get('response_time', 0) > ApiMonitoring.SLOW_RESPONSE_THRESHOLD:
             recommendations.append("Slow API response times detected - consider optimizing queries")
 
         # Rate limit recommendations
@@ -273,13 +275,13 @@ class SalesforceHealthChecker:
 
         # Performance recommendations
         for metric in diagnostics.get('performance_metrics', []):
-            if metric['average_response_time'] > 2.0:
+            if metric['average_response_time'] > ApiMonitoring.RECOMMENDATION_RESPONSE_THRESHOLD:
                 recommendations.append(f"Slow {metric['operation']} operations detected - consider query optimization")
 
         # Connection pool recommendations
         pool = diagnostics.get('connection_pool', {})
         utilization = pool.get('utilization_rate', 0)
-        if utilization > 0.8:
+        if utilization > ApiMonitoring.HEAVY_USAGE_RATIO:
             recommendations.append("High connection pool utilization - consider increasing pool size")
 
         return recommendations

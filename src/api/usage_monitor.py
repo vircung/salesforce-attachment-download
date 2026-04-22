@@ -11,6 +11,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 
+from src.config_limits import Buffers, ApiMonitoring
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +27,7 @@ class APIUsageStats:
     query_calls: int = 0
     download_calls: int = 0
     error_calls: int = 0
-    response_times: deque[float] = field(default_factory=lambda: deque(maxlen=1000))
+    response_times: deque[float] = field(default_factory=lambda: deque(maxlen=Buffers.MAX_RESPONSE_HISTORY))
     last_call_time: Optional[float] = None
     rate_limit_remaining: Optional[int] = None
     rate_limit_reset: Optional[float] = None
@@ -79,7 +81,8 @@ class SalesforceUsageMonitor:
         Initialize the usage monitor.
 
         Args:
-            max_response_times: Maximum number of response times to keep in history
+            max_response_times: Ignored — deque window is controlled by
+                Buffers.MAX_RESPONSE_HISTORY in config_limits.py (pre-existing design).
         """
         self.stats = APIUsageStats()
         self.max_response_times = max_response_times
@@ -120,13 +123,13 @@ class SalesforceUsageMonitor:
             self._extract_rate_limit_info(headers)
 
         # Log significant events
-        if self.stats.total_calls % 100 == 0:
+        if self.stats.total_calls % ApiMonitoring.LOG_MILESTONE_CALLS == 0:
             logger.info(f"API usage milestone: {self.stats.total_calls} total calls")
             logger.info(f"Average response time: {self.stats.get_average_response_time():.2f}s")
 
         # Warn about high error rates
         error_rate = self.stats.error_calls / self.stats.total_calls
-        if error_rate > 0.1 and self.stats.total_calls > 10:
+        if error_rate > ApiMonitoring.ALERT_ERROR_RATE and self.stats.total_calls > ApiMonitoring.MIN_CALLS_FOR_ANALYSIS:
             logger.warning(f"High error rate detected: {error_rate:.1%}")
 
     def _extract_rate_limit_info(self, headers: Dict[str, str]) -> None:
@@ -146,7 +149,7 @@ class SalesforceUsageMonitor:
                 self.stats.rate_limit_remaining = remaining_calls
 
                 # Estimate reset time (Salesforce resets every 24 hours)
-                if remaining_calls < 100:  # Getting close to limit
+                if remaining_calls < ApiMonitoring.NEAR_LIMIT_CALLS:
                     self.stats.rate_limit_reset = time.time() + 86400  # 24 hours
 
             except (ValueError, IndexError):
@@ -181,30 +184,30 @@ class SalesforceUsageMonitor:
         # Error rate analysis
         if self.stats.total_calls > 0:
             error_rate = self.stats.error_calls / self.stats.total_calls
-            if error_rate > 0.05:
+            if error_rate > ApiMonitoring.HIGH_ERROR_RATE:
                 insights['error_rate'] = f"High error rate: {error_rate:.1%}"
-            elif error_rate > 0.01:
+            elif error_rate > ApiMonitoring.MODERATE_ERROR_RATE:
                 insights['error_rate'] = f"Moderate error rate: {error_rate:.1%}"
 
         # Rate limit warnings
-        if self.stats.rate_limit_remaining is not None and self.stats.rate_limit_remaining < 100:
+        if self.stats.rate_limit_remaining is not None and self.stats.rate_limit_remaining < ApiMonitoring.NEAR_LIMIT_CALLS:
             insights['rate_limit'] = f"Approaching rate limit: {self.stats.rate_limit_remaining} calls remaining"
 
         # Performance insights
         avg_time = self.stats.get_average_response_time()
-        if avg_time > 5.0:
+        if avg_time > ApiMonitoring.SLOW_RESPONSE_THRESHOLD:
             insights['performance'] = f"Slow responses: {avg_time:.2f}s average"
-        elif avg_time > 1.0:
+        elif avg_time > ApiMonitoring.MODERATE_RESPONSE_THRESHOLD:
             insights['performance'] = f"Moderate response times: {avg_time:.2f}s average"
 
         # Call distribution
-        if self.stats.total_calls > 10:
+        if self.stats.total_calls > ApiMonitoring.MIN_CALLS_FOR_ANALYSIS:
             query_ratio = self.stats.query_calls / self.stats.total_calls
             download_ratio = self.stats.download_calls / self.stats.total_calls
 
-            if query_ratio > 0.8:
+            if query_ratio > ApiMonitoring.HEAVY_USAGE_RATIO:
                 insights['distribution'] = "Heavy query usage - consider bulk API for large datasets"
-            elif download_ratio > 0.8:
+            elif download_ratio > ApiMonitoring.HEAVY_USAGE_RATIO:
                 insights['distribution'] = "Heavy download usage - monitor bandwidth and rate limits"
 
         return insights

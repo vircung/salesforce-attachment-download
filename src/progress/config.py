@@ -12,6 +12,8 @@ from typing import Dict, Type, Optional
 
 from .core.tracker import ProgressRenderer
 
+from ..config_limits import Progress
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,16 +22,16 @@ class ProgressConfig:
     """Configuration settings for progress tracking system."""
     
     # Update frequencies (in seconds)
-    min_update_interval: float = 0.1  # Minimum time between updates
-    rich_refresh_rate: int = 4  # Rich renderer refresh rate (Hz)
-    debounce_interval: float = 0.05  # Debouncing for rapid updates
-    
+    min_update_interval: float = Progress.MIN_UPDATE_INTERVAL
+    rich_refresh_rate: int = Progress.RICH_REFRESH_RATE
+    debounce_interval: float = Progress.DEBOUNCE_INTERVAL
+
     # Performance tuning
-    enable_update_debouncing: bool = True  # Debounce rapid updates
-    
+    enable_update_debouncing: bool = Progress.ENABLE_DEBOUNCING
+
     # Thread safety
-    renderer_selection_timeout: float = 5.0  # Timeout for renderer selection
-    callback_copy_timeout: float = 1.0  # Timeout for callback list copying
+    renderer_selection_timeout: float = Progress.RENDERER_SELECTION_TIMEOUT
+    callback_copy_timeout: float = Progress.CALLBACK_COPY_TIMEOUT
 
 
 # Global configuration instance
@@ -69,7 +71,7 @@ class RendererRegistry:
         self._renderers: Dict[str, Type[ProgressRenderer]] = {}
         self._cached_selection: Optional[Type[ProgressRenderer]] = None
         self._last_selection_time: float = 0
-        self._selection_cache_ttl: float = 30.0  # Cache for 30 seconds
+        self._selection_cache_ttl: float = Progress.SELECTION_CACHE_TTL
     
     def register(self, name: str, renderer_class: Type[ProgressRenderer]) -> None:
         """Register a renderer class."""

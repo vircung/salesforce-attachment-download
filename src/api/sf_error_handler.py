@@ -12,6 +12,8 @@ from typing import Callable, Any, Optional
 
 from simple_salesforce.exceptions import SalesforceError
 
+from src.config_limits import Retry
+
 logger = logging.getLogger(__name__)
 
 
@@ -101,10 +103,10 @@ class SalesforceErrorHandler:
     @staticmethod
     def execute_with_retry(
         operation: Callable,
-        max_retries: int = 3,
-        base_delay: float = 1.0,
-        max_delay: float = 60.0,
-        backoff_factor: float = 2.0
+        max_retries: int = Retry.MAX_RETRIES_API,
+        base_delay: float = Retry.BASE_DELAY,
+        max_delay: float = Retry.MAX_DELAY,
+        backoff_factor: float = Retry.BACKOFF_FACTOR
     ) -> Any:
         """
         Execute an operation with exponential backoff retry logic.

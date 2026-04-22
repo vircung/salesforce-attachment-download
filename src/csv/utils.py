@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 from typing import List, Dict
 
+from src.config_limits import BatchSize
+
 logger = logging.getLogger(__name__)
 
 
@@ -233,7 +235,7 @@ def batch_ids(ids: List[str], batch_size: int) -> List[List[str]]:
 
 def prepare_csv_record_info(
     csv_path: Path,
-    batch_size: int = 100
+    batch_size: int = BatchSize.DEFAULT
 ):
     """
     Prepare complete CSV record information including batching.
@@ -282,7 +284,7 @@ def prepare_csv_record_info(
 
 def process_records_directory(
     records_dir: Path,
-    batch_size: int = 100
+    batch_size: int = BatchSize.DEFAULT
 ):
     """
     Process all CSV files in directory and prepare for querying.

@@ -10,6 +10,8 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
+from src.config_limits import Workers, BatchSize
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,8 +34,8 @@ def parse_arguments():
 
     # CSV Records processing configuration from .env
     env_records_dir = os.getenv('RECORDS_DIR')
-    env_batch_size = os.getenv('BATCH_SIZE', '100')
-    env_workers = os.getenv('WORKERS', '2')
+    env_batch_size = os.getenv('BATCH_SIZE', str(BatchSize.DEFAULT))
+    env_workers = os.getenv('WORKERS', str(Workers.DEFAULT))
     env_sync_only = os.getenv('SYNC_ONLY', 'false').lower() in ('true', '1', 'yes')
     
     # Logging configuration from .env
@@ -48,26 +50,26 @@ def parse_arguments():
 
 
     # Validate and convert BATCH_SIZE to int
-    default_batch_size = 100
+    default_batch_size = BatchSize.DEFAULT
     try:
         default_batch_size = int(env_batch_size)
-        if default_batch_size < 1:
-            logger.warning(f"BATCH_SIZE must be at least 1, got {default_batch_size}. Using default 100.")
-            default_batch_size = 100
+        if default_batch_size < BatchSize.MIN:
+            logger.warning(f"BATCH_SIZE must be at least {BatchSize.MIN}, got {default_batch_size}. Using default {BatchSize.DEFAULT}.")
+            default_batch_size = BatchSize.DEFAULT
     except ValueError:
-        logger.warning(f"Invalid BATCH_SIZE value '{env_batch_size}', using default 100")
-        default_batch_size = 100
+        logger.warning(f"Invalid BATCH_SIZE value '{env_batch_size}', using default {BatchSize.DEFAULT}")
+        default_batch_size = BatchSize.DEFAULT
 
     # Validate and convert WORKERS to int
-    default_workers = 2
+    default_workers = Workers.DEFAULT
     try:
         default_workers = int(env_workers)
-        if default_workers < 1 or default_workers > 8:
-            logger.warning(f"WORKERS must be 1-8, got {default_workers}. Using 2.")
-            default_workers = 2
+        if default_workers < Workers.MIN or default_workers > Workers.MAX:
+            logger.warning(f"WORKERS must be {Workers.MIN}-{Workers.MAX}, got {default_workers}. Using {Workers.DEFAULT}.")
+            default_workers = Workers.DEFAULT
     except ValueError:
-        logger.warning(f"Invalid WORKERS value '{env_workers}', using 2")
-        default_workers = 2
+        logger.warning(f"Invalid WORKERS value '{env_workers}', using {Workers.DEFAULT}")
+        default_workers = Workers.DEFAULT
 
 
     parser = argparse.ArgumentParser(
@@ -101,7 +103,7 @@ def parse_arguments():
         '--workers',
         type=int,
         default=default_workers,
-        help=f'Parallel workers for queries and downloads (default: {default_workers}, max: 8)'
+        help=f'Parallel workers for queries and downloads (default: {default_workers}, max: {Workers.MAX})'
     )
     parser.add_argument(
         '--sync-only',
@@ -153,11 +155,11 @@ def parse_arguments():
         args.workers = 1
         logger.info("--sync-only: forcing --workers=1")
 
-    if args.workers < 1 or args.workers > 8:
+    if args.workers < Workers.MIN or args.workers > Workers.MAX:
         logger.warning(
-            f"--workers must be 1-8, got {args.workers}. Using default 2."
+            f"--workers must be {Workers.MIN}-{Workers.MAX}, got {args.workers}. Using default {Workers.DEFAULT}."
         )
-        args.workers = 2
+        args.workers = Workers.DEFAULT
 
 
     # Resolve records directory from CLI or env

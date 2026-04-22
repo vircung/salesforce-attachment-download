@@ -15,6 +15,8 @@ from typing import List, Optional, Dict, Any, Tuple, Iterator
 
 from src.logging.handlers import ProgressAwareConsoleHandler
 
+from src.config_limits import Buffers
+
 try:
     from rich.console import Console
     from rich.panel import Panel
@@ -62,7 +64,7 @@ class LoggingManager:
         
         # Message buffering
         self._buffered_warnings: List[Tuple[float, str, Dict[str, Any]]] = []
-        self._max_buffered_messages = 50  # Prevent memory issues
+        self._max_buffered_messages = Buffers.MAX_BUFFERED_LOG_MESSAGES
         
         # Rich console for error display (lazy initialized)
         self._rich_console: Optional[Any] = None
