@@ -375,7 +375,7 @@ def coordinate_all_downloads(
             csv_name=obj_result.csv_name,
             downloaded_count=total_downloaded,
             skipped_count=obj_skipped,
-            failed_count=total_failed,
+            failed_count=max(0, total_failed),
             errors=all_errors,
             total_attachments=obj_result.total_attachments,
             downloaded_entries=obj_downloaded_entries,
