@@ -13,6 +13,7 @@ from typing import Callable, Any, Optional
 from simple_salesforce.exceptions import SalesforceError
 
 from src.config_limits import Retry
+from src.exceptions import SFAuthError
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,10 @@ class SalesforceErrorHandler:
                     f"Attempt {attempt + 1} failed, retrying in {delay:.1f}s: {e}"
                 )
                 time.sleep(delay)
+
+            except SFAuthError:
+                # Auth failures are not retryable
+                raise
 
             except OSError as e:
                 # Deterministic OS errors (e.g. filename too long) should not be retried
