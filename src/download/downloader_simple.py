@@ -30,6 +30,13 @@ DEFAULT_READ_TIMEOUT = HttpTimeout.READ
 DEFAULT_TMP_DIR_NAME = FileSystem.TMP_DIR_NAME
 
 
+def make_download_url(instance_url: str, attachment_id: str) -> str:
+    """Build Salesforce file download URL for an attachment."""
+    if instance_url:
+        return f"{instance_url}/servlet/servlet.FileDownload?file={attachment_id}"
+    return ""
+
+
 def download_attachment_simple_salesforce(
     attachment_id: str,
     output_path: Path,
@@ -198,11 +205,6 @@ def download_batch(
     stats.total = len(attachments)
     downloaded_entries: List[Dict[str, Any]] = []
 
-    def _make_download_url(attachment_id: str) -> str:
-        if instance_url:
-            return f"{instance_url}/servlet/servlet.FileDownload?file={attachment_id}"
-        return ""
-
     def _append_to_report(entry: Dict[str, Any]) -> None:
         """Append entry to shared report_entries under lock."""
         if report_entries is not None:
@@ -242,7 +244,7 @@ def download_batch(
                     'parent_id': attachment.parent_id,
                     'filename': output_filename,
                     'object_name': object_name,
-                    'download_url': _make_download_url(attachment.id),
+                    'download_url': make_download_url(instance_url, attachment.id),
                     'body_length': attachment.body_length,
                 }
                 downloaded_entries.append(dl_entry)
@@ -294,7 +296,7 @@ def download_batch(
                     'parent_id': attachment.parent_id,
                     'filename': output_filename,
                     'object_name': object_name,
-                    'download_url': _make_download_url(attachment.id),
+                    'download_url': make_download_url(instance_url, attachment.id),
                     'error': str(e),
                     'error_type': error_type,
                 })
@@ -321,7 +323,7 @@ def download_batch(
                     'parent_id': attachment.parent_id,
                     'filename': output_filename,
                     'object_name': object_name,
-                    'download_url': _make_download_url(attachment.id),
+                    'download_url': make_download_url(instance_url, attachment.id),
                     'error': str(e),
                     'error_type': 'SFAPIError',
                 })
@@ -350,7 +352,7 @@ def download_batch(
                     'parent_id': attachment.parent_id,
                     'filename': output_filename,
                     'object_name': object_name,
-                    'download_url': _make_download_url(attachment.id),
+                    'download_url': make_download_url(instance_url, attachment.id),
                     'error': str(e),
                     'error_type': 'OSError',
                 })

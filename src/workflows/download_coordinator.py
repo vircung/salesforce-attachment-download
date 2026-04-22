@@ -25,6 +25,7 @@ from src.api.usage_monitor import SalesforceUsageMonitor
 from src.download.filename import (
     detect_filename_collisions, build_output_filename, FilenameInfo
 )
+from src.download.downloader_simple import make_download_url
 from src.download.scan import scan_existing_files, load_skipped_attachment_ids
 from src.report.writer import REPORT_MISSING
 from src.progress.worker_tracker import WorkerActivityTracker
@@ -258,11 +259,6 @@ def coordinate_all_downloads(
 
     all_download_results = []
 
-    def _make_download_url(attachment_id: str) -> str:
-        if instance_url:
-            return f"{instance_url}/servlet/servlet.FileDownload?file={attachment_id}"
-        return ""
-
     for prep in prep_results:
         obj_result = prep.obj_result
 
@@ -320,7 +316,7 @@ def coordinate_all_downloads(
                         'parent_id': err.get('parent_id', ''),
                         'filename': err.get('output_filename', err.get('name', '')),
                         'object_name': obj_result.csv_name,
-                        'download_url': _make_download_url(err.get('id', '')),
+                        'download_url': make_download_url(instance_url, err.get('id', '')),
                         'error': err.get('error', ''),
                         'error_type': err.get('error_type', 'Unknown'),
                     })
@@ -365,7 +361,7 @@ def coordinate_all_downloads(
                             'parent_id': attachment.parent_id,
                             'filename': output_filename,
                             'object_name': obj_result.csv_name,
-                            'download_url': _make_download_url(attachment.id),
+                            'download_url': make_download_url(instance_url, attachment.id),
                             'error': 'Batch aborted due to fatal error',
                             'error_type': 'BatchAborted',
                         })
