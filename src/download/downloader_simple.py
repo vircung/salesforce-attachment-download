@@ -230,6 +230,12 @@ def download_batch(
                         f"Filename too long for filesystem: {output_filename}"
                     )
 
+                # Skip files that appeared on disk between the pre-scan and now
+                if output_path.exists():
+                    stats.skipped += 1
+                    stats.completed += 1
+                    continue
+
                 result_bytes = download_attachment_simple_salesforce(
                     attachment.id, output_path, sf_client,
                     error_handler, usage_monitor
