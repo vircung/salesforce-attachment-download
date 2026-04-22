@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from src.constants import Columns
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,7 +53,7 @@ def validate_metadata_csv(csv_path: Path) -> tuple[bool, Optional[str]]:
                 return False, "CSV file is empty or has no header row"
 
             # Check required columns
-            required_columns = ['Id', 'Name']
+            required_columns = [Columns.ID, Columns.NAME]
             recommended_columns = ['ParentId']  # Recommended for filtering
 
             missing_required = [col for col in required_columns if col not in fieldnames]
@@ -74,11 +76,10 @@ def validate_metadata_csv(csv_path: Path) -> tuple[bool, Optional[str]]:
             # Check if CSV has any data rows
             try:
                 first_row = next(reader)
-                # Validate that Id and Name are not empty in first row
-                if not first_row.get('Id') or not first_row.get('Id').strip():
-                    return False, "CSV has empty 'Id' field in first data row"
-                if not first_row.get('Name') or not first_row.get('Name').strip():
-                    return False, "CSV has empty 'Name' field in first data row"
+                if not first_row.get(Columns.ID) or not first_row.get(Columns.ID).strip():
+                    return False, f"CSV has empty '{Columns.ID}' field in first data row"
+                if not first_row.get(Columns.NAME) or not first_row.get(Columns.NAME).strip():
+                    return False, f"CSV has empty '{Columns.NAME}' field in first data row"
             except StopIteration:
                 return False, "CSV has header but no data rows"
 
