@@ -10,8 +10,6 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from threading import Lock
-
 from simple_salesforce.api import Salesforce
 
 from src.api.sf_connection import SalesforceConnectionPool
@@ -21,10 +19,6 @@ from src.exceptions import SFQueryError
 from src.models import AttachmentRecord
 
 logger = logging.getLogger(__name__)
-
-# Thread-safe flag to track if query template details have been logged
-_query_logged_lock = Lock()
-_query_logged = False
 
 # Salesforce Attachment fields to query
 ATTACHMENT_FIELDS = [
@@ -80,16 +74,8 @@ def execute_soql_query_simple_salesforce(
         SFQueryError: If query execution fails
     """
     logger.debug("Executing SOQL query with simple-salesforce...")
-    
-    # Log query template details only once per execution
-    global _query_logged
-    with _query_logged_lock:
-        if not _query_logged:
-            logger.debug(f"Query length: {len(query)} chars")
-            logger.debug(f"Query preview: {query[:150]}...")
-            _query_logged = True
-    
-    # Always log execution progress
+    logger.debug(f"Query length: {len(query)} chars")
+    logger.debug(f"Query preview: {query[:150]}...")
     logger.debug("Executing query batch")
 
     # Track API call start
