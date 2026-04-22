@@ -125,8 +125,6 @@ class SalesforceErrorHandler:
         Raises:
             SalesforceError: If all retry attempts fail
         """
-        last_error: Exception = Exception("No error occurred")
-
         for attempt in range(max_retries + 1):
             try:
                 result = operation()
@@ -135,8 +133,6 @@ class SalesforceErrorHandler:
                 return result
 
             except SalesforceError as e:
-                last_error = e
-
                 if attempt == max_retries:
                     logger.error(f"Operation failed after {max_retries + 1} attempts: {e}")
                     raise
@@ -145,12 +141,8 @@ class SalesforceErrorHandler:
                     logger.error(f"Non-retryable error encountered: {e}")
                     raise
 
-                # Calculate delay with exponential backoff
                 delay = min(base_delay * (backoff_factor ** attempt), max_delay)
-
-                logger.warning(
-                    f"Attempt {attempt + 1} failed, retrying in {delay:.1f}s: {e}"
-                )
+                logger.warning(f"Attempt {attempt + 1} failed, retrying in {delay:.1f}s: {e}")
                 time.sleep(delay)
 
             except SFAuthError:
@@ -163,22 +155,15 @@ class SalesforceErrorHandler:
                 raise
 
             except Exception as e:
-                # Non-Salesforce errors (network issues, etc.)
-                last_error = e
-
                 if attempt == max_retries:
                     logger.error(f"Operation failed after {max_retries + 1} attempts: {e}")
                     raise
 
-                # For non-Salesforce errors, always retry
                 delay = min(base_delay * (backoff_factor ** attempt), max_delay)
                 logger.warning(
                     f"Non-Salesforce error on attempt {attempt + 1}, retrying in {delay:.1f}s: {e}"
                 )
                 time.sleep(delay)
-
-        # This should never be reached, but just in case
-        raise last_error
 
     @staticmethod
     def wrap_operation(operation: Callable, **retry_kwargs) -> Callable:
