@@ -11,7 +11,7 @@ import logging
 import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Set, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock
 
 from src.models import AttachmentRecord, BatchResult, ObjectQueryResult
@@ -42,14 +42,8 @@ class DownloadResult:
     failed_count: int
     errors: List[Dict[str, Any]]
     total_attachments: int
-    downloaded_entries: List[Dict[str, Any]] = None
-    error_entries: List[Dict[str, Any]] = None
-
-    def __post_init__(self):
-        if self.downloaded_entries is None:
-            self.downloaded_entries = []
-        if self.error_entries is None:
-            self.error_entries = []
+    downloaded_entries: List[Dict[str, Any]] = field(default_factory=list)
+    error_entries: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
