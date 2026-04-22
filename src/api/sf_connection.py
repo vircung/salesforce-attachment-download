@@ -11,8 +11,6 @@ from typing import Optional
 
 from simple_salesforce.api import Salesforce
 
-from src.api.sf_auth_adapter import SFCLIAuthAdapter
-
 from src.config_limits import ConnectionPool, Workers
 
 
@@ -61,17 +59,21 @@ class SalesforceConnectionPool:
         """
         Initialize the pool with authenticated client instances.
 
-        Creates the specified number of simple-salesforce clients
-        using the authentication adapter. Captures instance_url from
-        the auth adapter for use in download URLs.
+        Calls get_sf_auth_info once, then creates pool_size independent
+        Salesforce instances — each with its own requests.Session — so
+        concurrent workers do not share a session object.
         """
         from src.api.sf_auth import get_sf_auth_info
         auth_info = get_sf_auth_info(self.org_alias)
         self._instance_url = auth_info.get('instance_url', '')
 
-        adapter = SFCLIAuthAdapter(self.org_alias)
         for _ in range(self.pool_size):
-            client = adapter.get_client()
+            client = Salesforce(
+                instance_url=auth_info['instance_url'],
+                session_id=auth_info['access_token'],
+                version=auth_info.get('api_version', '65.0'),
+            )
+            client.session.headers['Authorization'] = f'Bearer {auth_info["access_token"]}'
             self._pool.put(client)
 
     @property
