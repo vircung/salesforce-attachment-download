@@ -13,6 +13,7 @@ from typing import Literal, NoReturn, Any
 
 from src.exceptions import SFQueryError, SFAuthError
 from src.query.soql_simple import ATTACHMENT_FIELDS, build_attachment_query  # noqa: F401
+from src.config_limits import QueryTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ def execute_soql_query(
             cmd,
             capture_output=True,
             text=True,
-            timeout=300  # 5 minutes timeout
+            timeout=QueryTimeout.QUERY_TASK
         )
         
         # Handle success
@@ -104,7 +105,7 @@ def execute_soql_query(
         
     except subprocess.TimeoutExpired:
         raise SFQueryError(
-            "Query execution timed out after 5 minutes.\n"
+            f"Query execution timed out after {QueryTimeout.QUERY_TASK}s.\n"
             "Possible causes:\n"
             "  - Query is too complex or returns too many records\n"
             "  - Network connection issues\n"
