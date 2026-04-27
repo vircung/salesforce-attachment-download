@@ -207,24 +207,13 @@ def query_attachments_with_simple_salesforce(
     # Build SOQL query
     query = build_attachment_query(where_clause)
 
-    # Get client from pool or create new one
-    if connection_pool:
-        sf_client = connection_pool.get_connection()
-        try:
-            records = execute_soql_query_simple_salesforce(
-                sf_client, query, error_handler, usage_monitor
-            )
-        finally:
-            connection_pool.return_connection(sf_client)
-    else:
-        # Fallback: create client directly (for backward compatibility)
-        from src.api.sf_auth_adapter import SFCLIAuthAdapter
-        adapter = SFCLIAuthAdapter(org_alias)
-        sf_client = adapter.get_client()
-
+    sf_client = connection_pool.get_connection()
+    try:
         records = execute_soql_query_simple_salesforce(
             sf_client, query, error_handler, usage_monitor
         )
+    finally:
+        connection_pool.return_connection(sf_client)
 
     # Convert to AttachmentRecord instances
     attachment_records = _records_to_attachment_records(records)

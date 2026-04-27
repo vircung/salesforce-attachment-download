@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 
 class ErrorAction(Enum):
     """Action to take after error handling."""
-    CONTINUE = "continue"    # Not used in current implementation (for future resume)
-    STOP = "stop"             # Halt entire workflow immediately (current behavior)
-    RETRY = "retry"           # Not used in current implementation (for future resume)
+    STOP = "stop"
 
 
 class WorkflowErrorHandler:

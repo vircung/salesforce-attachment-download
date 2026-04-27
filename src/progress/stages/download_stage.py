@@ -118,16 +118,6 @@ class DownloadStage(WorkflowStage):
             return filename
         return f"{filename[:max_length - 3]}..."
 
-    def complete_downloads(self, total_downloaded: int, total_failed: int = 0, total_skipped: int = 0):
-        """Mark download phase as completed."""
-        message = f"Downloaded {total_downloaded} file(s)"
-        if total_failed > 0:
-            message += f" ({total_failed} failed)"
-        if total_skipped > 0:
-            message += f" ({total_skipped} skipped)"
-        
-        self.complete(message=message)
-
     def get_display_info(self) -> Dict[str, Any]:
         """Get download-specific information for display."""
         return super().get_display_info()
