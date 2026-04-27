@@ -77,17 +77,9 @@ class SalesforceUsageMonitor:
     insights into API usage patterns and potential rate limiting.
     """
 
-    def __init__(self, max_response_times: int = 1000):
-        """
-        Initialize the usage monitor.
-
-        Args:
-            max_response_times: Ignored — deque window is controlled by
-                Buffers.MAX_RESPONSE_HISTORY in config_limits.py (pre-existing design).
-        """
+    def __init__(self):
         self._lock = threading.RLock()
         self.stats = APIUsageStats()
-        self.max_response_times = max_response_times
         self._start_time = time.time()
 
     def track_call(

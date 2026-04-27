@@ -6,7 +6,6 @@ configuration management, and synchronous fallback mode.
 """
 
 import logging
-import os
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
@@ -40,23 +39,6 @@ class ThreadPoolConfig:
             )
             self.query_workers = Workers.DEFAULT
 
-    @classmethod
-    def from_env(cls) -> "ThreadPoolConfig":
-        """Create config from environment variables.
-
-        Environment variables:
-            QUERY_WORKERS: Number of worker threads (default 2)
-            SYNC_ONLY: 'true' to enable sync-only mode (default 'false')
-            QUERY_TIMEOUT: Task timeout in seconds (default 600)
-
-        Returns:
-            ThreadPoolConfig instance
-        """
-        return cls(
-            query_workers=int(os.getenv("QUERY_WORKERS", str(Workers.DEFAULT))),
-            sync_only=os.getenv("SYNC_ONLY", "false").lower() == "true",
-            query_timeout=int(os.getenv("QUERY_TIMEOUT", str(QueryTimeout.QUERY_TASK))),
-        )
 
 
 @dataclass

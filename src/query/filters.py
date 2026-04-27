@@ -27,17 +27,12 @@ class ParentIdFilter:
         prefixes: List of 3-character Salesforce ID prefixes to match
                   (e.g., ['aBo', '001'] for EMS_Attachment__c and Account)
         exact_ids: List of exact 15 or 18-character Salesforce IDs to match
-        strategy: Filtering strategy ('python' or 'soql')
-                  - 'python': Filter after querying all records
-                  - 'soql': Filter in SOQL query (only works with exact_ids)
     """
     prefixes: List[str]
     exact_ids: List[str]
-    strategy: str = 'python'
 
     def __post_init__(self):
         """Validate filter configuration."""
-        # Validate prefixes
         for prefix in self.prefixes:
             if not SALESFORCE_PREFIX_PATTERN.match(prefix):
                 raise ValueError(
@@ -45,27 +40,12 @@ class ParentIdFilter:
                     f"Expected 3 alphanumeric characters."
                 )
 
-        # Validate exact IDs
         for sf_id in self.exact_ids:
             if not SALESFORCE_ID_PATTERN.match(sf_id):
                 raise ValueError(
                     f"Invalid Salesforce ID format: '{sf_id}'. "
                     f"Expected 15 or 18 alphanumeric characters."
                 )
-
-        # Validate strategy
-        if self.strategy not in ['python', 'soql']:
-            raise ValueError(
-                f"Invalid filter strategy: '{self.strategy}'. "
-                f"Must be 'python' or 'soql'."
-            )
-
-        # Warn if using SOQL strategy with prefixes (not supported)
-        if self.strategy == 'soql' and self.prefixes and not self.exact_ids:
-            logger.warning(
-                "SOQL strategy does not support prefix filtering. "
-                "Prefix filters will be ignored. Use 'python' strategy for prefix filtering."
-            )
 
     def has_filters(self) -> bool:
         """Check if any filters are configured."""
@@ -81,7 +61,6 @@ class ParentIdFilter:
             if len(self.exact_ids) > 3:
                 ids_preview += f" (+{len(self.exact_ids) - 3} more)"
             parts.append(f"exact_ids={ids_preview}")
-        parts.append(f"strategy={self.strategy}")
         return f"ParentIdFilter({', '.join(parts)})"
 
 
@@ -89,32 +68,19 @@ def build_soql_where_clause(filter_config: ParentIdFilter) -> str:
     """
     Build SOQL WHERE clause for ParentId filtering.
 
-    Note: SOQL does not support LIKE patterns for ID fields, so only
-    exact ID matching is supported. Prefix filtering requires Python strategy.
+    Builds a SOQL WHERE clause for exact ParentId matching.
 
     Args:
-        filter_config: Filter configuration
+        filter_config: Filter configuration with exact_ids
 
     Returns:
         SOQL WHERE clause string (e.g., "WHERE ParentId IN ('id1','id2')")
-        Returns empty string if no filters or only prefixes specified
-
-    Example:
-        >>> config = ParentIdFilter(prefixes=[], exact_ids=['a3x123', 'a3x456'], strategy='soql')
-        >>> clause = build_soql_where_clause(config)
-        >>> print(clause)
-        WHERE ParentId IN ('a3x123','a3x456')
+        Returns empty string if no exact_ids specified
     """
     if not filter_config or not filter_config.has_filters():
         return ""
 
-    # SOQL strategy only supports exact ID filtering
     if not filter_config.exact_ids:
-        if filter_config.prefixes:
-            logger.warning(
-                "SOQL WHERE clause cannot be built for prefix filters. "
-                "Use 'python' strategy for prefix-based filtering."
-            )
         return ""
 
     # Build WHERE IN clause with exact IDs

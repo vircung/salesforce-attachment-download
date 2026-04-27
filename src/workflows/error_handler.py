@@ -6,7 +6,6 @@ Coordinates error responses and progress stage updates across all phases.
 """
 
 import logging
-from enum import Enum
 from typing import List
 
 from src.exceptions import SFAuthError, SFQueryError, SFAPIError
@@ -14,11 +13,6 @@ from src.progress.stages import CsvProcessingStage, SoqlQueryStage, DownloadStag
 from src.progress.core.stage import StageStatus
 
 logger = logging.getLogger(__name__)
-
-
-class ErrorAction(Enum):
-    """Action to take after error handling."""
-    STOP = "stop"
 
 
 class WorkflowErrorHandler:
@@ -53,7 +47,7 @@ class WorkflowErrorHandler:
         self,
         csv_name: str,
         error: Exception
-    ) -> ErrorAction:
+    ) -> None:
         """
         Handle errors during CSV processing phase (Phase 1).
         
@@ -94,13 +88,13 @@ class WorkflowErrorHandler:
             self.csv_stage.fail(str(error))
         
         logger.info("Workflow stopping due to CSV phase error (fail-fast)")
-        return ErrorAction.STOP
+        return
     
     def handle_query_error(
         self,
         csv_name: str,
         error: Exception
-    ) -> ErrorAction:
+    ) -> None:
         """
         Handle errors during SOQL query phase (Phase 2).
         
@@ -149,13 +143,13 @@ class WorkflowErrorHandler:
             self.soql_stage.fail(str(error))
         
         logger.info("Workflow stopping due to query phase error (fail-fast)")
-        return ErrorAction.STOP
+        return
     
     def handle_download_error(
         self,
         csv_name: str,
         error: Exception
-    ) -> ErrorAction:
+    ) -> None:
         """
         Handle errors during download phase (Phase 3).
         
@@ -199,7 +193,7 @@ class WorkflowErrorHandler:
             self.download_stage.fail(str(error))
         
         logger.info("Workflow stopping due to download phase error (fail-fast)")
-        return ErrorAction.STOP
+        return
     
     def get_failed_files(self) -> List[str]:
         """

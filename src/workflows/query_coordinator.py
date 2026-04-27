@@ -239,7 +239,6 @@ def _execute_single_batch(
         filter_config = ParentIdFilter(
             prefixes=[],
             exact_ids=id_batch,
-            strategy='soql'
         )
         where_clause = build_soql_where_clause(filter_config)
 
