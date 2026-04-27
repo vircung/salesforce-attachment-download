@@ -53,8 +53,8 @@ def parse_arguments():
     default_batch_size = BatchSize.DEFAULT
     try:
         default_batch_size = int(env_batch_size)
-        if default_batch_size < BatchSize.MIN:
-            logger.warning(f"BATCH_SIZE must be at least {BatchSize.MIN}, got {default_batch_size}. Using default {BatchSize.DEFAULT}.")
+        if default_batch_size < BatchSize.MIN or default_batch_size > BatchSize.MAX:
+            logger.warning(f"BATCH_SIZE must be {BatchSize.MIN}-{BatchSize.MAX}, got {default_batch_size}. Using default {BatchSize.DEFAULT}.")
             default_batch_size = BatchSize.DEFAULT
     except ValueError:
         logger.warning(f"Invalid BATCH_SIZE value '{env_batch_size}', using default {BatchSize.DEFAULT}")
@@ -97,7 +97,7 @@ def parse_arguments():
         '--batch-size',
         type=int,
         default=default_batch_size,
-        help=f'Number of ParentIds per SOQL query batch (default: {default_batch_size})'
+        help=f'Number of ParentIds per SOQL query batch (default: {default_batch_size}, max: {BatchSize.MAX})'
     )
     parser.add_argument(
         '--workers',
@@ -161,6 +161,11 @@ def parse_arguments():
         )
         args.workers = Workers.DEFAULT
 
+    if args.batch_size < BatchSize.MIN or args.batch_size > BatchSize.MAX:
+        logger.warning(
+            f"--batch-size must be {BatchSize.MIN}-{BatchSize.MAX}, got {args.batch_size}. Using default {BatchSize.DEFAULT}."
+        )
+        args.batch_size = BatchSize.DEFAULT
 
     # Resolve records directory from CLI or env
     if args.records_dir:

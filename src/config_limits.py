@@ -14,6 +14,7 @@ class Workers:
 class BatchSize:
     DEFAULT = 100
     MIN = 1
+    MAX = 500
 
 
 class QueryTimeout:
