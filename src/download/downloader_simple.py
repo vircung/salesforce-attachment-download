@@ -280,8 +280,8 @@ def download_batch(
                             skipped_count=stats.skipped,
                             bytes_transferred=stats.bytes_transferred
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Progress update failed: %s", e)
 
             except (SFNetworkError, SFAuthError) as e:
                 logger.error(f"Fatal error downloading {attachment.id}: {e}")
