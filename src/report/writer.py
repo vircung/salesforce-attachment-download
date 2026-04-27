@@ -98,7 +98,7 @@ def write_reports(
     # Merge with existing downloaded report
     existing_downloaded = read_report(downloaded_path)
     existing_dl_entries = existing_downloaded.get("entries", [])
-    merged_downloaded = _merge_entries(existing_dl_entries, new_downloaded)
+    merged_downloaded = merge_entries(existing_dl_entries, new_downloaded)
 
     # Merge with existing missing report, removing succeeded entries
     existing_missing = read_report(missing_path)
@@ -108,7 +108,7 @@ def write_reports(
         e for e in existing_ms_entries
         if e.get("attachment_id") not in succeeded_ids
     ]
-    merged_missing = _merge_entries(filtered_existing_missing, new_missing)
+    merged_missing = merge_entries(filtered_existing_missing, new_missing)
 
     # Collect all object names
     all_objects = sorted(set(
@@ -138,8 +138,8 @@ def write_reports(
         objects=all_objects,
     )
 
-    _write_json(downloaded_path, dl_report)
-    _write_json(missing_path, ms_report)
+    write_json(downloaded_path, dl_report)
+    write_json(missing_path, ms_report)
 
     logger.info(
         "Reports written: %d downloaded, %d missing → %s",
@@ -147,7 +147,7 @@ def write_reports(
     )
 
 
-def _merge_entries(
+def merge_entries(
     existing: List[Dict[str, Any]],
     new: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -164,7 +164,7 @@ def _merge_entries(
     return list(by_id.values())
 
 
-def _write_json(path: Path, data: Dict[str, Any]) -> None:
+def write_json(path: Path, data: Dict[str, Any]) -> None:
     """Write JSON with pretty formatting."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from src.report.writer import (
-    REPORT_DOWNLOADED, REPORT_MISSING, read_report, _write_json, _merge_entries,
+    REPORT_DOWNLOADED, REPORT_MISSING, read_report, write_json, merge_entries,
 )
 
 
@@ -69,7 +69,7 @@ def main() -> int:
             newly_missing.append(entry_copy)
 
     # Merge newly missing with existing missing entries
-    merged_missing = _merge_entries(existing_missing, newly_missing)
+    merged_missing = merge_entries(existing_missing, newly_missing)
 
     # Update summaries
     all_objects = sorted(set(
@@ -109,8 +109,8 @@ def main() -> int:
         "entries": merged_missing,
     }
 
-    _write_json(downloaded_path, dl_report)
-    _write_json(missing_path, ms_report)
+    write_json(downloaded_path, dl_report)
+    write_json(missing_path, ms_report)
 
     print(f"Verified: {len(still_present)} files")
     if newly_missing:
