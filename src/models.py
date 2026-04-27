@@ -1,8 +1,8 @@
 """Data models for in-memory pipeline."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 
 @dataclass
@@ -50,3 +50,16 @@ class CsvRecordInfo:
             f"total_records={self.total_records}, "
             f"total_batches={self.total_batches})"
         )
+
+
+@dataclass
+class DownloadResult:
+    """Result of downloading attachments for a single object."""
+    csv_name: str
+    downloaded_count: int
+    skipped_count: int
+    failed_count: int
+    errors: List[Dict[str, Any]]
+    total_attachments: int
+    downloaded_entries: List[Dict[str, Any]] = field(default_factory=list)
+    error_entries: List[Dict[str, Any]] = field(default_factory=list)

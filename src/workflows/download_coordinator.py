@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Tuple, Set, Optional
 from dataclasses import dataclass, field
 from threading import Lock
 
-from src.models import AttachmentRecord, BatchResult, ObjectQueryResult
+from src.models import AttachmentRecord, BatchResult, DownloadResult, ObjectQueryResult
 from src.progress.stages import DownloadStage
 from src.progress.stages.download_prep_stage import DownloadPrepStage
 from src.workflows.thread_pool import WorkflowThreadPool
@@ -31,19 +31,6 @@ from src.report.writer import REPORT_MISSING
 from src.progress.worker_tracker import WorkerActivityTracker
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class DownloadResult:
-    """Result of downloading attachments for a single object."""
-    csv_name: str
-    downloaded_count: int
-    skipped_count: int
-    failed_count: int
-    errors: List[Dict[str, Any]]
-    total_attachments: int
-    downloaded_entries: List[Dict[str, Any]] = field(default_factory=list)
-    error_entries: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
