@@ -265,16 +265,15 @@ def _execute_single_batch(
                 batch_id, attachment_count, f"done, {attachment_count} found"
             )
 
-        # Update counter atomically
         with completed_counter['lock']:
             completed_counter['count'] += 1
             completed_counter['total_attachments'] += attachment_count
+            snapshot_total = completed_counter['total_attachments']
 
-        # Complete batch
         soql_stage.complete_batch(
             batch_num=cumulative_batch_num,
             records_found=attachment_count,
-            total_attachments=completed_counter['total_attachments']
+            total_attachments=snapshot_total
         )
 
         logger.info(f"Batch {batch_id} completed: {attachment_count} attachment(s)")
