@@ -306,9 +306,6 @@ def download_batch(
                     'error': str(e),
                     'error_type': error_type,
                 })
-                if completed_counter:
-                    with completed_counter['lock']:
-                        completed_counter['count'] += 1
                 raise
 
             except SFAPIError as e:
