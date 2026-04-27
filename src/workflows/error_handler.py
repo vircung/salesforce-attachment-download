@@ -55,14 +55,12 @@ class WorkflowErrorHandler:
           - Log error with type and details
           - Add csv_name to failed_files list
           - Mark CSV stage as FAILED
-          - Return ErrorAction.STOP
+          - Stop workflow (fail-fast)
         
         Args:
             csv_name: Name of CSV being processed when error occurred
             error: Exception that was raised
         
-        Returns:
-            ErrorAction.STOP (always, in current implementation)
         """
         logger.error(f"✗ CSV processing failed for {csv_name}: {error}")
         
@@ -88,7 +86,6 @@ class WorkflowErrorHandler:
             self.csv_stage.fail(str(error))
         
         logger.info("Workflow stopping due to CSV phase error (fail-fast)")
-        return
     
     def handle_query_error(
         self,
@@ -104,14 +101,12 @@ class WorkflowErrorHandler:
           - Add csv_name to failed_files list
           - Mark CSV stage as FAILED
           - Mark SOQL stage as FAILED
-          - Return ErrorAction.STOP
+          - Stop workflow (fail-fast)
         
         Args:
             csv_name: CSV being queried when error occurred
             error: Exception that was raised
         
-        Returns:
-            ErrorAction.STOP (always, in current implementation)
         """
         logger.error(f"✗ Query failed for {csv_name}: {error}")
         
@@ -143,7 +138,6 @@ class WorkflowErrorHandler:
             self.soql_stage.fail(str(error))
         
         logger.info("Workflow stopping due to query phase error (fail-fast)")
-        return
     
     def handle_download_error(
         self,
@@ -158,14 +152,12 @@ class WorkflowErrorHandler:
           - Add csv_name to failed_files list
           - Mark CSV stage as FAILED
           - Mark download stage as FAILED
-          - Return ErrorAction.STOP
+          - Stop workflow (fail-fast)
         
         Args:
             csv_name: CSV being downloaded when error occurred
             error: Exception that was raised
         
-        Returns:
-            ErrorAction.STOP (always, in current implementation)
         """
         logger.error(f"✗ Download failed for {csv_name}: {error}")
         
@@ -193,7 +185,6 @@ class WorkflowErrorHandler:
             self.download_stage.fail(str(error))
         
         logger.info("Workflow stopping due to download phase error (fail-fast)")
-        return
     
     def get_failed_files(self) -> List[str]:
         """

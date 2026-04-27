@@ -176,7 +176,7 @@ def _records_to_attachment_records(records: List[Dict[str, Any]]) -> List[Attach
 def query_attachments_with_simple_salesforce(
     org_alias: str,
     where_clause: str,
-    connection_pool: Optional[SalesforceConnectionPool] = None,
+    connection_pool: SalesforceConnectionPool,
     error_handler: Optional[SalesforceErrorHandler] = None,
     usage_monitor: Optional[SalesforceUsageMonitor] = None,
     save_metadata: bool = False,

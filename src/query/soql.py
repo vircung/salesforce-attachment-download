@@ -53,16 +53,8 @@ def execute_soql_query(
     """
     logger.debug("Executing SOQL query via sf CLI...")
     
-    # Log query template details only once per execution
-    global _query_logged
-    with _query_logged_lock:
-        if not _query_logged:
-            logger.debug(f"Query length: {len(query)} chars")
-            logger.debug(f"Query preview: {query[:150]}...")
-            _query_logged = True
-    
-    # Always log execution progress
-    logger.debug("Executing query batch")
+    logger.debug(f"Query length: {len(query)} chars")
+    logger.debug(f"Query preview: {query[:150]}...")
     
     # Ensure output directory exists
     output_file.parent.mkdir(parents=True, exist_ok=True)

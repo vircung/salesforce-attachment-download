@@ -40,7 +40,6 @@ class ThreadPoolConfig:
             self.query_workers = Workers.DEFAULT
 
 
-
 @dataclass
 class WorkerResult:
     """Result of a worker task execution.
