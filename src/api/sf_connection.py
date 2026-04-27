@@ -5,7 +5,7 @@ This module provides a thread-safe connection pool for managing
 simple-salesforce client instances with optimal pool sizing.
 """
 
-from queue import Queue
+from queue import Empty, Queue
 from threading import Lock
 from typing import Optional
 
@@ -91,7 +91,13 @@ class SalesforceConnectionPool:
         Returns:
             Salesforce: Authenticated client instance
         """
-        return self._pool.get()
+        try:
+            return self._pool.get(timeout=ConnectionPool.TIMEOUT)
+        except Empty:
+            raise TimeoutError(
+                f"Connection pool exhausted: no connection available after {ConnectionPool.TIMEOUT}s "
+                f"(pool_size={self.pool_size})"
+            )
 
     def return_connection(self, conn: Salesforce) -> None:
         """

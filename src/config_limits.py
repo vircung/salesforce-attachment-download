@@ -80,5 +80,6 @@ class FileSystem:
 
 class ConnectionPool:
     MIN_POOL_SIZE = 10  # mirrors requests.Session default pool_maxsize
+    TIMEOUT = 30
 
 
