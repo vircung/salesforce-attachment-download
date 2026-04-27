@@ -6,6 +6,7 @@ API usage, including call counts, response times, and rate limiting.
 """
 
 import logging
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -84,6 +85,7 @@ class SalesforceUsageMonitor:
             max_response_times: Ignored — deque window is controlled by
                 Buffers.MAX_RESPONSE_HISTORY in config_limits.py (pre-existing design).
         """
+        self._lock = threading.RLock()
         self.stats = APIUsageStats()
         self.max_response_times = max_response_times
         self._start_time = time.time()
@@ -104,33 +106,31 @@ class SalesforceUsageMonitor:
             success: Whether the call was successful
             headers: Response headers for rate limit information
         """
-        self.stats.total_calls += 1
-        self.stats.last_call_time = time.time()
+        with self._lock:
+            self.stats.total_calls += 1
+            self.stats.last_call_time = time.time()
 
-        if call_type == 'query':
-            self.stats.query_calls += 1
-        elif call_type == 'download':
-            self.stats.download_calls += 1
+            if call_type == 'query':
+                self.stats.query_calls += 1
+            elif call_type == 'download':
+                self.stats.download_calls += 1
 
-        if not success:
-            self.stats.error_calls += 1
+            if not success:
+                self.stats.error_calls += 1
 
-        if response_time is not None:
-            self.stats.response_times.append(response_time)
+            if response_time is not None:
+                self.stats.response_times.append(response_time)
 
-        # Extract rate limit information from headers
-        if headers:
-            self._extract_rate_limit_info(headers)
+            if headers:
+                self._extract_rate_limit_info(headers)
 
-        # Log significant events
-        if self.stats.total_calls % ApiMonitoring.LOG_MILESTONE_CALLS == 0:
-            logger.info(f"API usage milestone: {self.stats.total_calls} total calls")
-            logger.info(f"Average response time: {self.stats.get_average_response_time():.2f}s")
+            if self.stats.total_calls % ApiMonitoring.LOG_MILESTONE_CALLS == 0:
+                logger.info(f"API usage milestone: {self.stats.total_calls} total calls")
+                logger.info(f"Average response time: {self.stats.get_average_response_time():.2f}s")
 
-        # Warn about high error rates
-        error_rate = self.stats.error_calls / self.stats.total_calls
-        if error_rate > ApiMonitoring.ALERT_ERROR_RATE and self.stats.total_calls > ApiMonitoring.MIN_CALLS_FOR_ANALYSIS:
-            logger.warning(f"High error rate detected: {error_rate:.1%}")
+            error_rate = self.stats.error_calls / self.stats.total_calls
+            if error_rate > ApiMonitoring.ALERT_ERROR_RATE and self.stats.total_calls > ApiMonitoring.MIN_CALLS_FOR_ANALYSIS:
+                logger.warning(f"High error rate detected: {error_rate:.1%}")
 
     def _extract_rate_limit_info(self, headers: Dict[str, str]) -> None:
         """
@@ -162,15 +162,16 @@ class SalesforceUsageMonitor:
         Returns:
             Dictionary containing usage statistics and insights
         """
-        runtime = time.time() - self._start_time
+        with self._lock:
+            runtime = time.time() - self._start_time
 
-        report = {
-            'runtime_seconds': runtime,
-            'stats': self.stats.to_dict(),
-            'insights': self._generate_insights(),
-        }
+            report = {
+                'runtime_seconds': runtime,
+                'stats': self.stats.to_dict(),
+                'insights': self._generate_insights(),
+            }
 
-        return report
+            return report
 
     def _generate_insights(self) -> Dict[str, Any]:
         """
@@ -214,8 +215,9 @@ class SalesforceUsageMonitor:
 
     def reset(self) -> None:
         """Reset all usage statistics."""
-        self.stats = APIUsageStats()
-        self._start_time = time.time()
+        with self._lock:
+            self.stats = APIUsageStats()
+            self._start_time = time.time()
         logger.info("Usage monitor reset")
 
     def log_summary(self) -> None:
