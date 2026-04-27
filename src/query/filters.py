@@ -9,13 +9,8 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import List, Dict, Optional
-from threading import Lock
 
 logger = logging.getLogger(__name__)
-
-# Thread-safe flag to track if filter details have been logged
-_filter_logged_lock = Lock()
-_filter_logged = False
 
 # Salesforce ID format: 15 or 18 characters, alphanumeric
 SALESFORCE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9]{15}$|^[a-zA-Z0-9]{18}$')
@@ -239,13 +234,8 @@ def build_soql_where_clause(filter_config: ParentIdFilter) -> str:
     ids_list = "','".join(escaped_ids)
     where_clause = f"WHERE ParentId IN ('{ids_list}')"
     
-    # Log filter details only once per execution
-    global _filter_logged
-    with _filter_logged_lock:
-        if not _filter_logged:
-            logger.debug(f"Built SOQL WHERE clause with {len(filter_config.exact_ids)} IDs")
-            _filter_logged = True
-    
+    logger.debug(f"Built SOQL WHERE clause with {len(filter_config.exact_ids)} IDs")
+
     return where_clause
 
 
